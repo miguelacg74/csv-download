@@ -1,0 +1,4 @@
+# Artefactos de compilacion (se regeneran con build.bat / build.sh)
+/csv-download/build/
+/csv-download/dist/
+/csv-download/out/

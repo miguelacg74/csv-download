@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<extension xmlns="http://jcp.org/jsr/198/extension-manifest"
+           id="com.csv.download"
+           version="1.0.0"
+           esdk-version="1.0">
+
+  <name>Descarga de tablas a CSV</name>
+  <owner>Ejemplo</owner>
+
+  <feature id="com.csv.download" xmlns="http://xmlns.oracle.com/ide/extension">
+    <category-id>db-category</category-id>
+    <name>Descarga de tablas a CSV</name>
+    <description>Exporta a CSV (separador ';') los datos de un listado de tablas</description>
+    <type>
+      <service can-user-disable="true" reload-if-used="true"/>
+    </type>
+  </feature>
+
+  <trigger-hooks xmlns="http://xmlns.oracle.com/ide/extension">
+
+    <triggers>
+
+      <actions xmlns="http://xmlns.oracle.com/jdeveloper/1013/extension">
+        <action id="com.csv.download.EXPORTAR">
+          <properties>
+            <property name="Name">Descargar tablas a CSV...</property>
+            <property name="Category">Tools</property>
+          </properties>
+        </action>
+      </actions>
+
+      <controllers>
+        <controller class="com.csv.download.CsvDownloadController">
+          <update-rules>
+            <update-rule rule="always-enabled">
+              <action id="com.csv.download.EXPORTAR"/>
+            </update-rule>
+          </update-rules>
+        </controller>
+      </controllers>
+
+      <menu-hook xmlns="http://jcp.org/jsr/198/extension-manifest">
+        <menus>
+          <menubar id="javax.ide.view.MAIN_WINDOW_MENUBAR_ID">
+            <menu id="Tools">
+              <section id="DATABASE_SECTION" weight="2.0">
+                <item action-ref="com.csv.download.EXPORTAR" weight="9.1"/>
+              </section>
+            </menu>
+          </menubar>
+        </menus>
+      </menu-hook>
+
+      <!-- Menu contextual del editor / hoja de trabajo -->
+      <context-menu-hook rule="always-enabled">
+        <site idref="editor"/>
+        <menu>
+          <section xmlns="http://jcp.org/jsr/198/extension-manifest" id="csvdownload_editor" weight="15.0">
+            <item action-ref="com.csv.download.EXPORTAR" weight="1.0"/>
+          </section>
+        </menu>
+      </context-menu-hook>
+
+      <!-- Menu contextual del navegador de conexiones -->
+      <context-menu-hook rule="always-enabled">
+        <site idref="db_nav"/>
+        <menu>
+          <section xmlns="http://jcp.org/jsr/198/extension-manifest" id="csvdownload_nav" weight="15.0">
+            <item action-ref="com.csv.download.EXPORTAR" weight="1.0"/>
+          </section>
+        </menu>
+      </context-menu-hook>
+
+    </triggers>
+  </trigger-hooks>
+
+</extension>

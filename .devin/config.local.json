@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Exec(ls)",
+      "Exec(find)",
+      "Exec(unzip)",
+      "Exec(grep)",
+      "Exec(awk)",
+      "Exec(sed)",
+      "Exec($JAVAP)",
+      "Exec(jdk/jre/bin/javap.exe)",
+      "Exec(mkdir)",
+      "Exec(\"C:/app/sqldeveloper/jdk/jre/bin/javac.exe\")"
+    ]
+  }
+}
