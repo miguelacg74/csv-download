@@ -40,6 +40,10 @@ import javax.swing.filechooser.FileNameExtensionFilter;
  * ({@link ExportPreset}) con los botones "Guardar preset..."/"Cargar
  * preset...".
  *
+ * Modo lote: "Ejecutar presets de carpeta..." ejecuta todos los presets
+ * (*.json) de una carpeta elegida por el usuario ({@link PresetBatch}),
+ * cada uno con su propia carpeta de salida.
+ *
  * Es Swing puro: recibe el padre por parametro y no usa APIs del IDE.
  */
 public class CsvExportDialog extends JDialog {
@@ -56,10 +60,12 @@ public class CsvExportDialog extends JDialog {
         private final boolean useCustomQuery;
         private final String customQuery;
         private final String customFileName;
+        private final List<File> presetFiles;
 
         private Request(List<String> tables, File directory, String where,
                         int maxRows, boolean useCustomQuery,
-                        String customQuery, String customFileName) {
+                        String customQuery, String customFileName,
+                        List<File> presetFiles) {
             this.tables = tables;
             this.directory = directory;
             this.where = where;
@@ -67,6 +73,17 @@ public class CsvExportDialog extends JDialog {
             this.useCustomQuery = useCustomQuery;
             this.customQuery = customQuery;
             this.customFileName = customFileName;
+            this.presetFiles = presetFiles;
+        }
+
+        /**
+         * Peticion de ejecucion en lote: se ignoran los campos del dialogo
+         * y se ejecutan los presets (*.json) indicados, cada uno con su
+         * propia configuracion.
+         */
+        public static Request forPresetBatch(List<File> presetFiles) {
+            return new Request(null, null, "", 0, false, "", "",
+                    presetFiles);
         }
 
         /** Nombres de tabla tal cual los escribio el usuario. */
@@ -101,6 +118,16 @@ public class CsvExportDialog extends JDialog {
         /** Nombre del CSV para la consulta; "consulta" si quedo vacio. */
         public String getCustomFileName() {
             return customFileName;
+        }
+
+        /** True si la peticion es un lote de presets ({@link PresetBatch}). */
+        public boolean isPresetBatch() {
+            return presetFiles != null;
+        }
+
+        /** Archivos de preset del lote; null en el modo normal. */
+        public List<File> getPresetFiles() {
+            return presetFiles;
         }
     }
 
@@ -208,8 +235,15 @@ public class CsvExportDialog extends JDialog {
                 savePreset();
             }
         });
+        JButton batch = new JButton("Ejecutar presets de carpeta...");
+        batch.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                runPresetFolder();
+            }
+        });
         presets.add(load);
         presets.add(save);
+        presets.add(batch);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         JButton export = new JButton("Descargar");
@@ -306,6 +340,46 @@ public class CsvExportDialog extends JDialog {
         return chooser;
     }
 
+    /**
+     * Modo lote: el usuario elige una carpeta con presets (*.json), se le
+     * muestran los encontrados y, si confirma, la peticion resultante es de
+     * tipo {@link Request#isPresetBatch()} (cada preset usara su propia
+     * carpeta de salida).
+     */
+    private void runPresetFolder() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        chooser.setDialogTitle("Carpeta con presets (*.json)");
+        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        List<File> files = PresetBatch.listPresets(chooser.getSelectedFile());
+        if (files.isEmpty()) {
+            warn("La carpeta elegida no contiene presets (*.json).");
+            return;
+        }
+        StringBuilder list = new StringBuilder();
+        int shown = Math.min(files.size(), 15);
+        for (int i = 0; i < shown; i++) {
+            list.append("  ").append(files.get(i).getName()).append('\n');
+        }
+        if (files.size() > shown) {
+            list.append("  ... y ").append(files.size() - shown)
+                    .append(" mas\n");
+        }
+        if (JOptionPane.showConfirmDialog(this,
+                "Se ejecutaran " + files.size() + " presets de\n"
+                        + chooser.getSelectedFile() + "\n\n" + list
+                        + "\nCada preset usara su propia carpeta de salida.\n"
+                        + "¿Continuar?",
+                getTitle(), JOptionPane.YES_NO_OPTION)
+                != JOptionPane.YES_OPTION) {
+            return;
+        }
+        request = Request.forPresetBatch(files);
+        dispose();
+    }
+
     /** Vuelca los campos actuales del dialogo a un preset. */
     private ExportPreset toPreset() {
         ExportPreset preset = new ExportPreset();
@@ -377,7 +451,7 @@ public class CsvExportDialog extends JDialog {
         }
 
         request = new Request(tables, dir, whereField.getText().trim(), maxRows,
-                custom, customQuery, customFileName);
+                custom, customQuery, customFileName, null);
         dispose();
     }
 

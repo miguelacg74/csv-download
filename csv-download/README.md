@@ -18,6 +18,10 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
   WHERE se ignoran; el limite sigue aplicando).
 - Todo el estado del dialogo se puede **guardar/recargar como preset JSON**
   (botones *Guardar preset...* / *Cargar preset...*).
+- **Ejecucion en lote de presets**: *Ejecutar presets de carpeta...* corre
+  todos los `*.json` de una carpeta (de tablas o de consulta, se mezclan
+  libremente) sobre la misma conexion; cada preset vuelca a su propia
+  carpeta de salida y el que falla no detiene el lote.
 - La exportacion corre en segundo plano con progreso y boton de cancelar;
   una tabla que falla no detiene el lote (queda en el resumen con su error).
 
@@ -87,6 +91,7 @@ src/com/csv/download/
   CsvDownloadController.java  accion del IDE (Tools, editor y navegador)
   ExportPreset.java           estado del dialogo <-> JSON (save/load)
   JsonUtil.java               serializador/parser JSON propio (sin librerias)
+  PresetBatch.java            ejecucion en lote de presets de una carpeta
 META-INF/MANIFEST.MF       bundle OSGi
 META-INF/extension.xml     descriptor de la extension (accion + menus)
 test/SelfTest.java         prueba manual del exportador y los presets

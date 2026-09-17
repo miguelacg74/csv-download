@@ -8,7 +8,9 @@ import java.awt.event.ActionListener;
 import java.io.File;
 import java.sql.Connection;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.swing.BorderFactory;
@@ -39,6 +41,8 @@ import oracle.ide.model.Element;
  * Se puede invocar desde el menu Tools, el menu contextual del editor (usa
  * la conexion de la hoja de trabajo activa) o el menu contextual del
  * navegador de conexiones (usa la conexion del nodo seleccionado).
+ * Desde el dialogo tambien se puede lanzar un lote de presets (*.json)
+ * de una carpeta ({@link PresetBatch}) sobre la misma conexion.
  *
  * La exportacion se hace en segundo plano con un dialogo de progreso
  * cancelable para no congelar el IDE.
@@ -83,19 +87,41 @@ public class CsvDownloadController implements Controller {
         final JLabel status = new JLabel(" ");
         final JDialog progress = progressDialog(status, cancelled);
 
-        SwingWorker<List<CsvExporter.TableResult>, String> worker =
-                new SwingWorker<List<CsvExporter.TableResult>, String>() {
+        SwingWorker<Object, String> worker =
+                new SwingWorker<Object, String>() {
             private List<CsvExporter.TableResult> results;
+            private List<PresetBatch.PresetResult> presetResults;
             private String error;
 
             @Override
-            protected List<CsvExporter.TableResult> doInBackground() {
+            protected Object doInBackground() {
                 Connection connection = connectionOf(dbObject, worksheet);
                 if (connection == null) {
                     error = "No hay conexion disponible.\nAbre una hoja de trabajo "
                             + "con conexion o usa el menu contextual sobre una "
                             + "conexion del navegador.";
                     return null;
+                }
+                if (request.isPresetBatch()) {
+                    PresetBatch.Progress batchProgress =
+                            new PresetBatch.Progress() {
+                        public boolean onProgress(String presetFile,
+                                                  int presetIndex,
+                                                  int presetTotal,
+                                                  String table, int index,
+                                                  int total, long rows) {
+                            publish("preset " + presetIndex + "/"
+                                    + presetTotal + " " + presetFile
+                                    + "  ::  " + table + "  (" + index + "/"
+                                    + total + ")"
+                                    + (rows > 0 ? "  " + rows + " filas"
+                                            : ""));
+                            return !cancelled.get();
+                        }
+                    };
+                    presetResults = PresetBatch.run(connection,
+                            request.getPresetFiles(), batchProgress);
+                    return presetResults;
                 }
                 CsvExporter.Progress progress = new CsvExporter.Progress() {
                     public boolean onProgress(String table, int index,
@@ -129,7 +155,12 @@ public class CsvDownloadController implements Controller {
                             TITLE, JOptionPane.WARNING_MESSAGE);
                     return;
                 }
-                showSummary(results, request.getDirectory(), cancelled.get());
+                if (presetResults != null) {
+                    showPresetSummary(presetResults, cancelled.get());
+                } else {
+                    showSummary(results, request.getDirectory(),
+                            cancelled.get());
+                }
             }
         };
         worker.execute();
@@ -217,6 +248,84 @@ public class CsvDownloadController implements Controller {
                 null, new String[]{"Abrir carpeta", "Cerrar"}, "Cerrar");
         if (choice == JOptionPane.YES_OPTION) {
             openFolder(dir);
+        }
+    }
+
+    /**
+     * Resumen del lote de presets: un bloque por archivo de preset con su
+     * carpeta de salida y el resultado de cada tabla/consulta. Ofrece abrir
+     * la carpeta solo si todos los CSV cayeron en la misma.
+     */
+    private static void showPresetSummary(
+            List<PresetBatch.PresetResult> results, boolean cancelled) {
+        StringBuilder text = new StringBuilder();
+        int presetsRun = 0;
+        int presetsFailed = 0;
+        int csvOk = 0;
+        int csvFailed = 0;
+        Set<File> outDirs = new LinkedHashSet<File>();
+        if (results == null) {
+            results = Collections.emptyList();
+        }
+        for (PresetBatch.PresetResult preset : results) {
+            text.append(preset.getFileName());
+            if (!preset.isOk()) {
+                presetsFailed++;
+                text.append(" -> [ERROR] ").append(preset.getError())
+                        .append("\n\n");
+                continue;
+            }
+            presetsRun++;
+            text.append(" -> ").append(preset.getOutputDir()).append('\n');
+            for (CsvExporter.TableResult r : preset.getTables()) {
+                if (r.isOk()) {
+                    csvOk++;
+                    outDirs.add(preset.getOutputDir());
+                    text.append("   [OK]   ").append(r.getTable())
+                            .append(" -> ").append(r.getFileName())
+                            .append(" (").append(r.getRows())
+                            .append(" filas")
+                            .append(r.isTruncated() ? ", truncada" : "")
+                            .append(")\n");
+                } else {
+                    csvFailed++;
+                    text.append("   [ERROR] ").append(r.getTable())
+                            .append(" -> ").append(r.getError()).append('\n');
+                }
+                for (String warning : r.getWarnings()) {
+                    text.append("           aviso: ").append(warning)
+                            .append('\n');
+                }
+            }
+            text.append('\n');
+        }
+        int totalErrors = presetsFailed + csvFailed;
+        String head = "Se ejecutaron " + presetsRun + " de " + results.size()
+                + " presets: " + csvOk + " CSV generados"
+                + (totalErrors > 0 ? ", " + totalErrors + " con error" : "")
+                + ".\n\n";
+        if (cancelled) {
+            head = "Lote cancelado. " + head;
+        }
+
+        JTextArea area = new JTextArea(head + text.toString(), 18, 60);
+        area.setEditable(false);
+        area.setCaretPosition(0);
+        JScrollPane scroll = new JScrollPane(area);
+        int icon = totalErrors > 0 ? JOptionPane.WARNING_MESSAGE
+                : JOptionPane.INFORMATION_MESSAGE;
+
+        if (outDirs.size() != 1) {
+            JOptionPane.showMessageDialog(Ide.getMainWindow(), scroll,
+                    TITLE, csvOk == 0 && totalErrors > 0
+                            ? JOptionPane.ERROR_MESSAGE : icon);
+            return;
+        }
+        int choice = JOptionPane.showOptionDialog(Ide.getMainWindow(), scroll,
+                TITLE, JOptionPane.YES_NO_OPTION, icon, null,
+                new String[]{"Abrir carpeta", "Cerrar"}, "Cerrar");
+        if (choice == JOptionPane.YES_OPTION) {
+            openFolder(outDirs.iterator().next());
         }
     }
 

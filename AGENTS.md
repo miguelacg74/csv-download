@@ -47,6 +47,11 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
   arrays/objetos anidados).
+- Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
+  carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
+  conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
+  falla no detiene el lote. Se lanza con "Ejecutar presets de carpeta..." del
+  dialogo, que devuelve un `Request` con `isPresetBatch()`.
 - En Windows un fichero abierto no se puede borrar: el CSV parcial de una tabla
   fallida/cancelada se borra DESPUES del finally que cierra el Writer.
 
@@ -64,8 +69,9 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 
 ## Sin dependencias externas
 
-`CsvExporter`, `ExportPreset` y `JsonUtil` son Java puro (JDBC + colecciones +
-io): deben seguir compilando y ejecutandose SIN los jars de SQL Developer.
+`CsvExporter`, `ExportPreset`, `JsonUtil` y `PresetBatch` son Java puro
+(JDBC + colecciones + io): deben seguir compilando y ejecutandose SIN los
+jars de SQL Developer.
 `CsvExportDialog` es Swing puro (recibe el padre por parametro). Solo
 `CsvDownloadController` usa APIs del IDE.
 Mantener esa frontera es lo que permite probar la logica fuera del IDE.

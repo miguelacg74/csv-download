@@ -1,5 +1,6 @@
 import com.csv.download.CsvExporter;
 import com.csv.download.ExportPreset;
+import com.csv.download.PresetBatch;
 
 import java.io.File;
 import java.lang.reflect.InvocationHandler;
@@ -227,8 +228,81 @@ public final class SelfTest {
                     "el error deberia explicar que el JSON es invalido");
         }
 
+        // ---- lote de presets: cada preset vuelca a su propia carpeta
+        // (se crea si no existe) y los que fallan no detienen el lote
+        File batchDir = Files.createTempDirectory("csvpresets").toFile();
+        File out1 = new File(batchDir, "salida1");
+        File out2 = new File(batchDir, "salida2");
+
+        ExportPreset p1 = new ExportPreset();
+        p1.setTables("EMP, BAD");           // BAD falla: el preset sigue
+        p1.setWhere("ID > 1");
+        p1.setMaxRows(2);
+        p1.setDirectory(out1.getAbsolutePath());
+        p1.save(new File(batchDir, "a_tablas.json"));
+
+        ExportPreset p2 = new ExportPreset();
+        p2.setUseCustomQuery(true);
+        p2.setCustomQuery("SELECT id FROM t;");
+        p2.setCustomFileName("consulta_lote");
+        p2.setDirectory(out2.getAbsolutePath());
+        p2.save(new File(batchDir, "b_consulta.json"));
+
+        Files.write(new File(batchDir, "c_roto.json").toPath(),
+                "{mal json".getBytes("UTF-8"));
+
+        ExportPreset p4 = new ExportPreset();   // sin tablas ni consulta
+        p4.setDirectory(out1.getAbsolutePath());
+        p4.save(new File(batchDir, "d_vacio.json"));
+
+        Files.write(new File(batchDir, "ignorame.txt").toPath(),
+                "no es preset".getBytes("UTF-8"));
+
+        List<File> presets = PresetBatch.listPresets(batchDir);
+        check(presets.size() == 4,
+                "deberian encontrarse 4 *.json, hubo " + presets.size());
+        check("a_tablas.json".equals(presets.get(0).getName()),
+                "los presets deberian ir ordenados por nombre: " + presets);
+
+        List<PresetBatch.PresetResult> batch =
+                PresetBatch.run(fake, presets, null);
+        check(batch.size() == 4,
+                "deberia haber un resultado por preset, hubo " + batch.size());
+
+        PresetBatch.PresetResult r1 = batch.get(0);
+        check(r1.isOk(), "el preset de tablas fallo: " + r1.getError());
+        check(out1.equals(r1.getOutputDir()),
+                "carpeta de salida del preset de tablas inesperada");
+        check(r1.getTables().size() == 2 && r1.getTables().get(0).isOk()
+                && !r1.getTables().get(1).isOk(),
+                "dentro del preset, BAD deberia fallar y EMP exportarse");
+        check(new File(out1, "EMP.csv").exists(),
+                "el preset de tablas no genero EMP.csv en su carpeta");
+
+        PresetBatch.PresetResult r2 = batch.get(1);
+        check(r2.isOk() && r2.getTables().get(0).isOk(),
+                "el preset de consulta fallo: " + r2.getError());
+        check(new File(out2, "consulta_lote.csv").exists(),
+                "el preset de consulta no genero su CSV");
+
+        check(batch.get(2).getError() != null,
+                "el JSON roto deberia registrar un error de lectura");
+        check(batch.get(3).getError() != null,
+                "el preset sin tablas ni consulta deberia dar error");
+
+        // cancelacion: devolver false en el primer aviso corta el lote
+        batch = PresetBatch.run(fake, presets, new PresetBatch.Progress() {
+            public boolean onProgress(String presetFile, int pi, int pt,
+                                      String table, int i, int n, long rows) {
+                return false;
+            }
+        });
+        check(batch.size() == 1,
+                "al cancelar no deberian ejecutarse mas presets");
+
         System.out.println("OK: todas las comprobaciones pasaron");
         deleteTree(dir);
+        deleteTree(batchDir);
     }
 
     private static String readFile(File file) throws Exception {
@@ -236,14 +310,14 @@ public final class SelfTest {
         return new String(bytes, Charset.forName("windows-1252"));
     }
 
-    private static void deleteTree(File dir) {
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                f.delete();
+    private static void deleteTree(File file) {
+        File[] children = file.isDirectory() ? file.listFiles() : null;
+        if (children != null) {
+            for (File child : children) {
+                deleteTree(child);
             }
         }
-        dir.delete();
+        file.delete();
     }
 
     /**
