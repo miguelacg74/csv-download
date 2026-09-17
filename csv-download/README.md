@@ -24,6 +24,8 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
   carpeta de salida y el que falla no detiene el lote.
 - La exportacion corre en segundo plano con progreso y boton de cancelar;
   una tabla que falla no detiene el lote (queda en el resumen con su error).
+  Cancelar tambien interrumpe la consulta en curso (no hay que esperar a que
+  termine).
 
 ## Formato del CSV
 

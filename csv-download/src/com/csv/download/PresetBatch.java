@@ -2,6 +2,7 @@ package com.csv.download;
 
 import java.io.File;
 import java.sql.Connection;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -31,6 +32,13 @@ public final class PresetBatch {
     public interface Progress {
         boolean onProgress(String presetFile, int presetIndex, int presetTotal,
                            String table, int index, int total, long rows);
+
+        /**
+         * Reenvio de {@link CsvExporter.Progress#onStatement(Statement)}:
+         * permite cancelar la consulta en curso con {@code st.cancel()}.
+         */
+        default void onStatement(Statement statement) {
+        }
     }
 
     /** Resultado de ejecutar un preset del lote. */
@@ -119,8 +127,11 @@ public final class PresetBatch {
         boolean[] cancelled = {false};
         int total = presetFiles.size();
         for (int i = 0; i < total; i++) {
-            results.add(runOne(connection, presetFiles.get(i), i + 1, total,
-                    progress, cancelled));
+            PresetResult result = runOne(connection, presetFiles.get(i),
+                    i + 1, total, progress, cancelled);
+            if (result != null) {
+                results.add(result);
+            }
             if (cancelled[0]) {
                 break;
             }
@@ -134,6 +145,12 @@ public final class PresetBatch {
                                        boolean[] cancelled) {
         List<CsvExporter.TableResult> none =
                 new ArrayList<CsvExporter.TableResult>();
+        if (progress != null
+                && !progress.onProgress(file.getName(), presetIndex,
+                        presetTotal, "", 0, 0, 0)) {
+            cancelled[0] = true;
+            return null;
+        }
         ExportPreset preset;
         try {
             preset = ExportPreset.load(file);
@@ -160,6 +177,23 @@ public final class PresetBatch {
                     "La ruta de salida no es una carpeta: " + dir, none);
         }
 
+        List<String> tables = preset.isUseCustomQuery()
+                ? null : CsvExporter.parseTableList(preset.getTables());
+        if (!preset.isUseCustomQuery() && tables.isEmpty()) {
+            return new PresetResult(file.getName(), dir,
+                    "El preset no tiene tablas ni consulta personalizada.",
+                    none);
+        }
+        try {
+            if (!connection.isValid(5)) {
+                return new PresetResult(file.getName(), dir,
+                        "La conexion se perdio o no responde.", none);
+            }
+        } catch (Throwable e) {
+            return new PresetResult(file.getName(), dir,
+                    "La conexion se perdio o no responde: " + e, none);
+        }
+
         CsvExporter.Progress inner = null;
         if (progress != null) {
             final String presetName = file.getName();
@@ -173,6 +207,10 @@ public final class PresetBatch {
                     }
                     return go;
                 }
+
+                public void onStatement(Statement statement) {
+                    progress.onStatement(statement);
+                }
             };
         }
 
@@ -181,12 +219,6 @@ public final class PresetBatch {
                     CsvExporter.exportQuery(connection, preset.getCustomQuery(),
                             preset.getMaxRows(), dir,
                             preset.getCustomFileName(), inner));
-        }
-        List<String> tables = CsvExporter.parseTableList(preset.getTables());
-        if (tables.isEmpty()) {
-            return new PresetResult(file.getName(), dir,
-                    "El preset no tiene tablas ni consulta personalizada.",
-                    none);
         }
         return new PresetResult(file.getName(), dir, null,
                 CsvExporter.export(connection, tables, preset.getWhere(),

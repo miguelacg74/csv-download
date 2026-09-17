@@ -7,11 +7,13 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
 import java.sql.Connection;
+import java.sql.Statement;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -84,8 +86,10 @@ public class CsvDownloadController implements Controller {
                                     final DBObject dbObject,
                                     final Worksheet worksheet) {
         final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AtomicReference<Statement> running =
+                new AtomicReference<Statement>();
         final JLabel status = new JLabel(" ");
-        final JDialog progress = progressDialog(status, cancelled);
+        final JDialog progress = progressDialog(status, cancelled, running);
 
         SwingWorker<Object, String> worker =
                 new SwingWorker<Object, String>() {
@@ -110,13 +114,20 @@ public class CsvDownloadController implements Controller {
                                                   int presetTotal,
                                                   String table, int index,
                                                   int total, long rows) {
-                            publish("preset " + presetIndex + "/"
-                                    + presetTotal + " " + presetFile
-                                    + "  ::  " + table + "  (" + index + "/"
-                                    + total + ")"
-                                    + (rows > 0 ? "  " + rows + " filas"
-                                            : ""));
+                            String message = "preset " + presetIndex + "/"
+                                    + presetTotal + " " + presetFile;
+                            if (table != null && !table.isEmpty()) {
+                                message += "  ::  " + table + "  (" + index
+                                        + "/" + total + ")"
+                                        + (rows > 0 ? "  " + rows + " filas"
+                                                : "");
+                            }
+                            publish(message);
                             return !cancelled.get();
+                        }
+
+                        public void onStatement(Statement statement) {
+                            running.set(statement);
                         }
                     };
                     presetResults = PresetBatch.run(connection,
@@ -129,6 +140,10 @@ public class CsvDownloadController implements Controller {
                         publish(table + "  (" + index + "/" + total + ")"
                                 + (rows > 0 ? "  " + rows + " filas" : ""));
                         return !cancelled.get();
+                    }
+
+                    public void onStatement(Statement statement) {
+                        running.set(statement);
                     }
                 };
                 results = request.isUseCustomQuery()
@@ -168,7 +183,8 @@ public class CsvDownloadController implements Controller {
     }
 
     private static JDialog progressDialog(JLabel status,
-                                          final AtomicBoolean cancelled) {
+                                          final AtomicBoolean cancelled,
+                                          final AtomicReference<Statement> running) {
         Frame owner = Ide.getMainWindow();
         final JDialog progress = new JDialog(owner, TITLE, true);
         JPanel panel = new JPanel(new BorderLayout(10, 10));
@@ -183,6 +199,17 @@ public class CsvDownloadController implements Controller {
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 cancelled.set(true);
+                // interrumpe la consulta en curso (ORA-01013), si la hay:
+                // el callback de progreso solo se consulta entre tablas o
+                // cada 200 filas, esto corta tambien un executeQuery largo
+                Statement st = running.get();
+                if (st != null) {
+                    try {
+                        st.cancel();
+                    } catch (Throwable ignored) {
+                        // el worker seguira cortando al ver cancelled=true
+                    }
+                }
                 progress.dispose();
             }
         });

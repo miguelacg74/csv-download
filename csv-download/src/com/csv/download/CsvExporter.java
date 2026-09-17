@@ -55,12 +55,23 @@ public final class CsvExporter {
     }
 
     /**
-     * Callback de progreso y cancelacion: se invoca al empezar cada tabla y
-     * cada {@link #PROGRESS_EVERY_ROWS} filas. Devolver {@code false} cancela
-     * la exportacion (la tabla en curso se descarta).
+     * Callback de progreso y cancelacion: se invoca al empezar cada tabla,
+     * justo antes de cada {@code executeQuery} y cada
+     * {@link #PROGRESS_EVERY_ROWS} filas. Devolver {@code false} cancela la
+     * exportacion (la tabla en curso se descarta).
      */
     public interface Progress {
         boolean onProgress(String table, int index, int total, long rows);
+
+        /**
+         * Se invoca al crear cada Statement, antes de ejecutarlo: permite
+         * que quien muestra el progreso guarde la referencia y llame a
+         * {@link Statement#cancel()} para interrumpir un executeQuery largo
+         * o bloqueado (el driver lanza ORA-01013, que se reporta como
+         * cancelacion). Implementacion vacia por defecto.
+         */
+        default void onStatement(Statement statement) {
+        }
     }
 
     /** Resultado de la exportacion de una tabla. */
@@ -336,6 +347,9 @@ public final class CsvExporter {
         String error = null;
         try {
             st = connection.createStatement();
+            if (progress != null) {
+                progress.onStatement(st);
+            }
             if (maxRows > 0) {
                 // una fila extra solo para detectar que la tabla se trunco
                 st.setMaxRows(maxRows + 1);
@@ -343,35 +357,44 @@ public final class CsvExporter {
             } else {
                 st.setFetchSize(FETCH_SIZE);
             }
-            rs = st.executeQuery(sql);
-            ResultSetMetaData md = rs.getMetaData();
-            int columns = md.getColumnCount();
+            if (progress != null
+                    && !progress.onProgress(label, index, total, 0)) {
+                cancelled = true;
+            } else {
+                rs = st.executeQuery(sql);
+                ResultSetMetaData md = rs.getMetaData();
+                int columns = md.getColumnCount();
 
-            writer = new BufferedWriter(new OutputStreamWriter(
-                    new FileOutputStream(out), CHARSET));
-            writeHeader(writer, md, columns);
+                writer = new BufferedWriter(new OutputStreamWriter(
+                        new FileOutputStream(out), CHARSET));
+                writeHeader(writer, md, columns);
 
-            Set<String> warned = new LinkedHashSet<String>();
-            while (rs.next()) {
-                rows++;
-                if (maxRows > 0 && rows > maxRows) {
-                    truncated = true;
-                    rows--;
-                    break;
+                Set<String> warned = new LinkedHashSet<String>();
+                while (rs.next()) {
+                    rows++;
+                    if (maxRows > 0 && rows > maxRows) {
+                        truncated = true;
+                        rows--;
+                        break;
+                    }
+                    writeRow(writer, rs, md, columns, warnings, warned);
+                    if (progress != null && rows % PROGRESS_EVERY_ROWS == 0
+                            && !progress.onProgress(label, index, total, rows)) {
+                        cancelled = true;
+                        break;
+                    }
                 }
-                writeRow(writer, rs, md, columns, warnings, warned);
-                if (progress != null && rows % PROGRESS_EVERY_ROWS == 0
-                        && !progress.onProgress(label, index, total, rows)) {
-                    cancelled = true;
-                    break;
+                if (truncated) {
+                    warnings.add("Se exportaron solo " + maxRows + " filas de "
+                            + label + "; el origen tiene mas datos.");
                 }
-            }
-            if (truncated) {
-                warnings.add("Se exportaron solo " + maxRows + " filas de "
-                        + label + "; el origen tiene mas datos.");
             }
         } catch (Exception e) {
-            error = errorText(e, sql);
+            if (isCancel(e)) {
+                cancelled = true;
+            } else {
+                error = errorText(e, sql);
+            }
         } finally {
             // cerrar antes de poder borrar el CSV parcial (Windows lo exige)
             closeQuietly(writer);
@@ -495,6 +518,12 @@ public final class CsvExporter {
         if (warned.add(key)) {
             warnings.add(message);
         }
+    }
+
+    /** ORA-01013: la consulta se interrumpio desde el boton Cancelar. */
+    private static boolean isCancel(Exception e) {
+        String message = e.getMessage();
+        return message != null && message.contains("ORA-01013");
     }
 
     private static String errorText(Exception e, String sql) {

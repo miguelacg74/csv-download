@@ -16,6 +16,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -264,10 +265,31 @@ public final class SelfTest {
         check("a_tablas.json".equals(presets.get(0).getName()),
                 "los presets deberian ir ordenados por nombre: " + presets);
 
+        final List<String> presetStarts = new ArrayList<String>();
+        final AtomicInteger statements = new AtomicInteger();
+        PresetBatch.Progress rec = new PresetBatch.Progress() {
+            public boolean onProgress(String presetFile, int pi, int pt,
+                                      String table, int i, int n, long rows) {
+                if (table.isEmpty()) {
+                    presetStarts.add(presetFile);
+                }
+                return true;
+            }
+
+            public void onStatement(Statement st) {
+                statements.incrementAndGet();
+            }
+        };
         List<PresetBatch.PresetResult> batch =
-                PresetBatch.run(fake, presets, null);
+                PresetBatch.run(fake, presets, rec);
         check(batch.size() == 4,
                 "deberia haber un resultado por preset, hubo " + batch.size());
+        check(presetStarts.size() == 4
+                && "a_tablas.json".equals(presetStarts.get(0)),
+                "deberia avisarse al empezar cada preset: " + presetStarts);
+        check(statements.get() >= 3,
+                "onStatement deberia invocarse por cada consulta ejecutada: "
+                        + statements.get());
 
         PresetBatch.PresetResult r1 = batch.get(0);
         check(r1.isOk(), "el preset de tablas fallo: " + r1.getError());
@@ -290,15 +312,16 @@ public final class SelfTest {
         check(batch.get(3).getError() != null,
                 "el preset sin tablas ni consulta deberia dar error");
 
-        // cancelacion: devolver false en el primer aviso corta el lote
+        // cancelacion: devolver false en el primer aviso (inicio del primer
+        // preset) corta el lote sin ejecutar nada
         batch = PresetBatch.run(fake, presets, new PresetBatch.Progress() {
             public boolean onProgress(String presetFile, int pi, int pt,
                                       String table, int i, int n, long rows) {
                 return false;
             }
         });
-        check(batch.size() == 1,
-                "al cancelar no deberian ejecutarse mas presets");
+        check(batch.isEmpty(),
+                "al cancelar al inicio no deberia ejecutarse ningun preset");
 
         System.out.println("OK: todas las comprobaciones pasaron");
         deleteTree(dir);
@@ -376,6 +399,9 @@ public final class SelfTest {
             public Object invoke(Object p, Method m, Object[] a) {
                 if ("createStatement".equals(m.getName())) {
                     return st;
+                }
+                if ("isValid".equals(m.getName())) {
+                    return true;
                 }
                 return defaultValue(m.getReturnType());
             }

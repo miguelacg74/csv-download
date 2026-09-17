@@ -51,7 +51,14 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
   falla no detiene el lote. Se lanza con "Ejecutar presets de carpeta..." del
-  dialogo, que devuelve un `Request` con `isPresetBatch()`.
+  dialogo, que devuelve un `Request` con `isPresetBatch()`. Antes de cada
+  preset avisa al callback (con `table` vacia) y valida la conexion con
+  `connection.isValid(5)`.
+- Progreso/cancelacion: `Progress.onProgress` se invoca al empezar cada tabla,
+  antes de cada `executeQuery` y cada 200 filas; `Progress.onStatement` (hook
+  opcional) expone el Statement en curso para que Cancelar llame a
+  `st.cancel()` y corte un `executeQuery` largo/bloqueado (ORA-01013 se
+  reporta como "Cancelado por el usuario").
 - En Windows un fichero abierto no se puede borrar: el CSV parcial de una tabla
   fallida/cancelada se borra DESPUES del finally que cierra el Writer.
 
@@ -103,9 +110,10 @@ Mantener esa frontera es lo que permite probar la logica fuera del IDE.
 
 - Ninguna consulta JDBC ni escritura de ficheros en el hilo de interfaz: la
   exportacion va en `SwingWorker` con dialogo modal de progreso y boton
-  Cancelar (AtomicBoolean consultado por el callback `Progress`). El callback
-  corre en el hilo del worker: actualizar la UI via `publish`/`process` o
-  `SwingUtilities.invokeLater`.
+  Cancelar (AtomicBoolean consultado por el callback `Progress` + el hook
+  `onStatement` guarda el Statement vivo en un AtomicReference para que
+  Cancelar llame a `st.cancel()`). El callback corre en el hilo del worker:
+  actualizar la UI via `publish`/`process` o `SwingUtilities.invokeLater`.
 - `CsvExportDialog` es modal; devuelve la peticion validada o null.
 
 ## Generacion CSV (correctitud primero)
