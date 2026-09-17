@@ -81,15 +81,18 @@ public final class CsvExporter {
         private final String fileName;
         private final long rows;
         private final boolean truncated;
+        private final boolean skipped;
         private final String error;
         private final List<String> warnings;
 
         private TableResult(String table, String fileName, long rows,
-                            boolean truncated, String error, List<String> warnings) {
+                            boolean truncated, boolean skipped,
+                            String error, List<String> warnings) {
             this.table = table;
             this.fileName = fileName;
             this.rows = rows;
             this.truncated = truncated;
+            this.skipped = skipped;
             this.error = error;
             this.warnings = warnings;
         }
@@ -98,7 +101,10 @@ public final class CsvExporter {
             return table;
         }
 
-        /** Nombre del CSV generado; null si la tabla fallo o se cancelo. */
+        /**
+         * Nombre del CSV generado (o del existente si la tabla se omitio);
+         * null si la tabla fallo o se cancelo.
+         */
         public String getFileName() {
             return fileName;
         }
@@ -112,7 +118,15 @@ public final class CsvExporter {
             return truncated;
         }
 
-        /** Mensaje de error; null si la tabla se exporto bien. */
+        /**
+         * True si la tabla se omitio porque su CSV ya existia (opcion
+         * "no reemplazar"): no es un error, pero tampoco se genero nada.
+         */
+        public boolean isSkipped() {
+            return skipped;
+        }
+
+        /** Mensaje de error; null si la tabla se exporto bien o se omitio. */
         public String getError() {
             return error;
         }
@@ -121,8 +135,9 @@ public final class CsvExporter {
             return warnings;
         }
 
+        /** True si el CSV se escribio en esta ejecucion. */
         public boolean isOk() {
-            return error == null && fileName != null;
+            return error == null && fileName != null && !skipped;
         }
     }
 
@@ -224,6 +239,9 @@ public final class CsvExporter {
      *                 (sin la palabra WHERE); vacia o null = tabla completa
      * @param maxRows  maximo de filas por tabla; &lt;= 0 = sin limite
      * @param dir      carpeta de salida (debe existir)
+     * @param skipExisting true = omitir las tablas cuyo CSV ya existe en
+     *                 {@code dir} (no se consultan ni se reemplazan; quedan
+     *                 marcadas con {@link TableResult#isSkipped()})
      * @param progress callback de progreso/cancelacion; null = sin callback
      * @return un TableResult por tabla, en el orden del listado; la lista se
      *         corta si el usuario cancela
@@ -231,6 +249,7 @@ public final class CsvExporter {
     public static List<TableResult> export(Connection connection,
                                            List<String> tables, String where,
                                            int maxRows, File dir,
+                                           boolean skipExisting,
                                            Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String condition = where == null ? "" : where.trim();
@@ -243,7 +262,8 @@ public final class CsvExporter {
             }
             String qualified = qualifiedName(token);
             results.add(exportTable(connection, token, qualified, condition,
-                    maxRows, dir, index, tables.size(), progress));
+                    maxRows, dir, skipExisting, index, tables.size(),
+                    progress));
         }
         return results;
     }
@@ -260,13 +280,14 @@ public final class CsvExporter {
     public static List<TableResult> exportQuery(Connection connection,
                                                 String sql, int maxRows,
                                                 File dir, String fileName,
+                                                boolean skipExisting,
                                                 Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String checked;
         try {
             checked = checkedQuery(sql);
         } catch (SQLException e) {
-            results.add(new TableResult("consulta", null, 0, false,
+            results.add(new TableResult("consulta", null, 0, false, false,
                     e.getMessage(), new ArrayList<String>()));
             return results;
         }
@@ -274,7 +295,7 @@ public final class CsvExporter {
                 ? "consulta" : fileName;
         File out = new File(dir, fileNameFor(name));
         results.add(runSelect(connection, checked, maxRows, out, out.getName(),
-                1, 1, progress));
+                1, 1, skipExisting, progress));
         return results;
     }
 
@@ -323,20 +344,28 @@ public final class CsvExporter {
 
     private static TableResult exportTable(Connection connection, String token,
                                            String qualified, String where,
-                                           int maxRows, File dir, int index,
+                                           int maxRows, File dir,
+                                           boolean skipExisting, int index,
                                            int total, Progress progress) {
         String sql = "SELECT * FROM " + qualified
                 + (where.isEmpty() ? "" : " WHERE " + where);
         File out = new File(dir, fileNameFor(token));
         return runSelect(connection, sql, maxRows, out, qualified,
-                index, total, progress);
+                index, total, skipExisting, progress);
     }
 
     /** Nucleo comun: ejecuta el SELECT y vuelca el ResultSet al CSV. */
     private static TableResult runSelect(Connection connection, String sql,
                                          int maxRows, File out,
                                          String label, int index, int total,
+                                         boolean skipExisting,
                                          Progress progress) {
+        if (skipExisting && out.isFile()) {
+            // el CSV ya existe: ni se consulta la tabla ni se toca el
+            // archivo (sirve para reanudar lotes cancelados o con fallos)
+            return new TableResult(label, out.getName(), 0, false, true,
+                    null, new ArrayList<String>());
+        }
         List<String> warnings = new ArrayList<String>();
         Statement st = null;
         ResultSet rs = null;
@@ -403,15 +432,16 @@ public final class CsvExporter {
         }
         if (error != null) {
             deleteQuietly(out);
-            return new TableResult(label, null, rows, false, error, warnings);
+            return new TableResult(label, null, rows, false, false,
+                    error, warnings);
         }
         if (cancelled) {
             deleteQuietly(out);
-            return new TableResult(label, null, rows, false,
+            return new TableResult(label, null, rows, false, false,
                     "Cancelado por el usuario.", warnings);
         }
         return new TableResult(label, out.getName(), rows, truncated,
-                null, warnings);
+                false, null, warnings);
     }
 
     private static void writeHeader(Writer writer, ResultSetMetaData md,

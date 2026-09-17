@@ -25,6 +25,7 @@ public final class ExportPreset {
     private String directory = "";
     private String where = "";
     private int maxRows;
+    private boolean skipExisting;
     private boolean useCustomQuery;
     private String customQuery = "";
     private String customFileName = "";
@@ -64,6 +65,14 @@ public final class ExportPreset {
         this.maxRows = maxRows;
     }
 
+    public boolean isSkipExisting() {
+        return skipExisting;
+    }
+
+    public void setSkipExisting(boolean skipExisting) {
+        this.skipExisting = skipExisting;
+    }
+
     public boolean isUseCustomQuery() {
         return useCustomQuery;
     }
@@ -96,6 +105,7 @@ public final class ExportPreset {
         values.put("directory", directory);
         values.put("where", where);
         values.put("maxRows", maxRows);
+        values.put("skipExisting", skipExisting);
         values.put("useCustomQuery", useCustomQuery);
         values.put("customQuery", customQuery);
         values.put("customFileName", customFileName);
@@ -113,6 +123,7 @@ public final class ExportPreset {
         preset.directory = value(values, "directory", "");
         preset.where = value(values, "where", "");
         preset.maxRows = intValue(values.get("maxRows"), 0);
+        preset.skipExisting = "true".equals(values.get("skipExisting"));
         preset.useCustomQuery = "true".equals(values.get("useCustomQuery"));
         preset.customQuery = value(values, "customQuery", "");
         preset.customFileName = value(values, "customFileName", "");

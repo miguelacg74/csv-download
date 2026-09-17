@@ -134,7 +134,8 @@ public class CsvDownloadController implements Controller {
                         }
                     };
                     presetResults = PresetBatch.run(connection,
-                            request.getPresetFiles(), batchProgress);
+                            request.getPresetFiles(),
+                            request.isSkipExisting(), batchProgress);
                     return presetResults;
                 }
                 CsvExporter.Progress progress = new CsvExporter.Progress() {
@@ -153,10 +154,12 @@ public class CsvDownloadController implements Controller {
                         ? CsvExporter.exportQuery(connection,
                                 request.getCustomQuery(), request.getMaxRows(),
                                 request.getDirectory(),
-                                request.getCustomFileName(), progress)
+                                request.getCustomFileName(),
+                                request.isSkipExisting(), progress)
                         : CsvExporter.export(connection, request.getTables(),
                                 request.getWhere(), request.getMaxRows(),
-                                request.getDirectory(), progress);
+                                request.getDirectory(),
+                                request.isSkipExisting(), progress);
                 return results;
             }
 
@@ -232,11 +235,17 @@ public class CsvDownloadController implements Controller {
         StringBuilder text = new StringBuilder();
         int ok = 0;
         int failed = 0;
+        int skipped = 0;
         if (results == null) {
             results = Collections.emptyList();
         }
         for (CsvExporter.TableResult r : results) {
-            if (r.isOk()) {
+            if (r.isSkipped()) {
+                skipped++;
+                text.append("[OMITIDA] ").append(r.getTable())
+                        .append(" -> ").append(r.getFileName())
+                        .append(" (ya existia)\n");
+            } else if (r.isOk()) {
                 ok++;
                 text.append("[OK]   ").append(r.getTable())
                         .append(" -> ").append(r.getFileName())
@@ -255,6 +264,9 @@ public class CsvDownloadController implements Controller {
         String head = "Se generaron " + ok + " CSV en\n" + dir + "\n\n";
         if (cancelled) {
             head = "Exportacion cancelada. " + head;
+        }
+        if (skipped > 0) {
+            head += skipped + " tabla(s) omitidas (el CSV ya existia).\n\n";
         }
         if (failed > 0) {
             head += failed + " tabla(s) con error.\n\n";
@@ -293,6 +305,7 @@ public class CsvDownloadController implements Controller {
         int presetsFailed = 0;
         int csvOk = 0;
         int csvFailed = 0;
+        int csvSkipped = 0;
         Set<File> outDirs = new LinkedHashSet<File>();
         if (results == null) {
             results = Collections.emptyList();
@@ -308,7 +321,13 @@ public class CsvDownloadController implements Controller {
             presetsRun++;
             text.append(" -> ").append(preset.getOutputDir()).append('\n');
             for (CsvExporter.TableResult r : preset.getTables()) {
-                if (r.isOk()) {
+                if (r.isSkipped()) {
+                    csvSkipped++;
+                    outDirs.add(preset.getOutputDir());
+                    text.append("   [OMITIDA] ").append(r.getTable())
+                            .append(" -> ").append(r.getFileName())
+                            .append(" (ya existia)\n");
+                } else if (r.isOk()) {
                     csvOk++;
                     outDirs.add(preset.getOutputDir());
                     text.append("   [OK]   ").append(r.getTable())
@@ -332,6 +351,8 @@ public class CsvDownloadController implements Controller {
         int totalErrors = presetsFailed + csvFailed;
         String head = "Se ejecutaron " + presetsRun + " de " + results.size()
                 + " presets: " + csvOk + " CSV generados"
+                + (csvSkipped > 0
+                        ? ", " + csvSkipped + " omitidos (ya existian)" : "")
                 + (totalErrors > 0 ? ", " + totalErrors + " con error" : "")
                 + ".\n\n";
         if (cancelled) {

@@ -57,19 +57,22 @@ public class CsvExportDialog extends JDialog {
         private final File directory;
         private final String where;
         private final int maxRows;
+        private final boolean skipExisting;
         private final boolean useCustomQuery;
         private final String customQuery;
         private final String customFileName;
         private final List<File> presetFiles;
 
         private Request(List<String> tables, File directory, String where,
-                        int maxRows, boolean useCustomQuery,
+                        int maxRows, boolean skipExisting,
+                        boolean useCustomQuery,
                         String customQuery, String customFileName,
                         List<File> presetFiles) {
             this.tables = tables;
             this.directory = directory;
             this.where = where;
             this.maxRows = maxRows;
+            this.skipExisting = skipExisting;
             this.useCustomQuery = useCustomQuery;
             this.customQuery = customQuery;
             this.customFileName = customFileName;
@@ -79,11 +82,14 @@ public class CsvExportDialog extends JDialog {
         /**
          * Peticion de ejecucion en lote: se ignoran los campos del dialogo
          * y se ejecutan los presets (*.json) indicados, cada uno con su
-         * propia configuracion.
+         * propia configuracion. Solo se conserva {@code skipExisting}: si
+         * el checkbox del dialogo esta marcado, fuerza la omision de los
+         * CSV existentes en TODO el lote (ademas del flag de cada preset).
          */
-        public static Request forPresetBatch(List<File> presetFiles) {
-            return new Request(null, null, "", 0, false, "", "",
-                    presetFiles);
+        public static Request forPresetBatch(List<File> presetFiles,
+                                             boolean skipExisting) {
+            return new Request(null, null, "", 0, skipExisting, false, "",
+                    "", presetFiles);
         }
 
         /** Nombres de tabla tal cual los escribio el usuario. */
@@ -103,6 +109,14 @@ public class CsvExportDialog extends JDialog {
         /** Maximo de filas por tabla; 0 = sin limite. */
         public int getMaxRows() {
             return maxRows;
+        }
+
+        /**
+         * True si hay que omitir las tablas cuyo CSV ya existe en la
+         * carpeta de salida en vez de reemplazarlo.
+         */
+        public boolean isSkipExisting() {
+            return skipExisting;
         }
 
         /** True si hay que exportar una consulta en vez del listado. */
@@ -142,6 +156,8 @@ public class CsvExportDialog extends JDialog {
             new JLabel("Condicion WHERE (opcional, para todas las tablas):");
     private final JTextField whereField = new JTextField(28);
     private final JTextField maxRowsField = new JTextField("0", 8);
+    private final JCheckBox skipCheck = new JCheckBox(
+            "No reemplazar los CSV que ya existen (omite esas tablas)");
     private Request request;
     /** Ultimo preset cargado/guardado: destino por defecto al guardar. */
     private File presetFile;
@@ -234,6 +250,7 @@ public class CsvExportDialog extends JDialog {
         limitPanel.add(new JLabel("Maximo de filas por tabla (0 = sin limite):"));
         limitPanel.add(maxRowsField);
         addRow(form, g, row++, limitPanel);
+        addRow(form, g, row++, skipCheck);
 
         JPanel buttons = new JPanel(new BorderLayout());
         buttons.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
@@ -391,16 +408,18 @@ public class CsvExportDialog extends JDialog {
             list.append("  ... y ").append(files.size() - shown)
                     .append(" mas\n");
         }
+        String skipNote = skipCheck.isSelected()
+                ? "Se omitiran los CSV que ya existen en cada carpeta.\n" : "";
         if (JOptionPane.showConfirmDialog(this,
                 "Se ejecutaran " + files.size() + " presets de\n"
                         + chooser.getSelectedFile() + "\n\n" + list
                         + "\nCada preset usara su propia carpeta de salida.\n"
-                        + "¿Continuar?",
+                        + skipNote + "¿Continuar?",
                 getTitle(), JOptionPane.YES_NO_OPTION)
                 != JOptionPane.YES_OPTION) {
             return;
         }
-        request = Request.forPresetBatch(files);
+        request = Request.forPresetBatch(files, skipCheck.isSelected());
         dispose();
     }
 
@@ -411,6 +430,7 @@ public class CsvExportDialog extends JDialog {
         preset.setDirectory(dirField.getText().trim());
         preset.setWhere(whereField.getText().trim());
         preset.setMaxRows(parseMaxRows(0));
+        preset.setSkipExisting(skipCheck.isSelected());
         preset.setUseCustomQuery(customCheck.isSelected());
         preset.setCustomQuery(queryArea.getText());
         preset.setCustomFileName(customFileField.getText().trim());
@@ -423,6 +443,7 @@ public class CsvExportDialog extends JDialog {
         dirField.setText(preset.getDirectory());
         whereField.setText(preset.getWhere());
         maxRowsField.setText(String.valueOf(preset.getMaxRows()));
+        skipCheck.setSelected(preset.isSkipExisting());
         customCheck.setSelected(preset.isUseCustomQuery());
         queryArea.setText(preset.getCustomQuery());
         customFileField.setText(preset.getCustomFileName().isEmpty()
@@ -474,8 +495,9 @@ public class CsvExportDialog extends JDialog {
             return;
         }
 
-        request = new Request(tables, dir, whereField.getText().trim(), maxRows,
-                custom, customQuery, customFileName, null);
+        request = new Request(tables, dir, whereField.getText().trim(),
+                maxRows, skipCheck.isSelected(), custom, customQuery,
+                customFileName, null);
         dispose();
     }
 

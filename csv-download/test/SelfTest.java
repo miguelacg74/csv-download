@@ -78,7 +78,8 @@ public final class SelfTest {
         File dir = Files.createTempDirectory("csvselftest").toFile();
 
         List<CsvExporter.TableResult> results =
-                CsvExporter.export(fake, Arrays.asList("EMP"), "", 0, dir, null);
+                CsvExporter.export(fake, Arrays.asList("EMP"), "", 0, dir,
+                        false, null);
         check(results.size() == 1, "deberia haber un resultado");
         CsvExporter.TableResult r = results.get(0);
         check(r.isOk(), "la exportacion fallo: " + r.getError());
@@ -101,7 +102,7 @@ public final class SelfTest {
 
         // ---- WHERE y limite aplicados a todas las tablas
         results = CsvExporter.export(fake, Arrays.asList("HR.EMP", "DEPT"),
-                "ID > 1", 2, dir, null);
+                "ID > 1", 2, dir, false, null);
         check("SELECT * FROM DEPT WHERE ID > 1".equals(executedSql[0]),
                 "el WHERE no se aplico a todas las tablas: " + executedSql[0]);
         check(results.size() == 2 && results.get(0).isOk()
@@ -116,7 +117,7 @@ public final class SelfTest {
 
         // ---- una tabla que falla no detiene el lote
         results = CsvExporter.export(fake, Arrays.asList("BAD", "EMP"),
-                "", 0, dir, null);
+                "", 0, dir, false, null);
         check(results.size() == 2, "deberia seguir tras el error");
         check(!results.get(0).isOk()
                 && results.get(0).getError().contains("ORA-00942"),
@@ -127,10 +128,42 @@ public final class SelfTest {
         check(!new File(dir, "BAD.csv").exists(),
                 "no deberia quedar CSV de la tabla fallida");
 
+        // ---- omitir CSV existentes: el archivo previo se conserva y la
+        // tabla no llega a consultarse (BAD lanzaria ORA-00942 si se
+        // ejecutara, asi que un salto correcto es lo unico que la salva)
+        File existing = new File(dir, "BAD.csv");
+        Files.write(existing.toPath(), "previo\r\n".getBytes("windows-1252"));
+        executedSql[0] = null;
+        results = CsvExporter.export(fake, Arrays.asList("OTRA", "BAD"),
+                "", 0, dir, true, null);
+        check(results.size() == 2, "deberia haber un resultado por tabla");
+        check(results.get(0).isOk() && !results.get(0).isSkipped(),
+                "OTRA deberia exportarse con normalidad");
+        CsvExporter.TableResult omitida = results.get(1);
+        check(omitida.isSkipped() && !omitida.isOk(),
+                "BAD deberia quedar omitida, no ejecutada: "
+                        + omitida.getError());
+        check("BAD.csv".equals(omitida.getFileName()),
+                "la omitida deberia indicar el CSV existente");
+        check("SELECT * FROM OTRA".equals(executedSql[0]),
+                "solo la tabla nueva deberia ejecutar el SELECT: "
+                        + executedSql[0]);
+        check("previo\r\n".equals(readFile(existing)),
+                "el CSV existente no deberia tocarse");
+
+        // sin la opcion, un CSV existente se reemplaza como siempre
+        // (y BAD sigue fallando y dejando el archivo borrado)
+        results = CsvExporter.export(fake, Arrays.asList("BAD"), "", 0, dir,
+                false, null);
+        check(!results.get(0).isOk() && !results.get(0).isSkipped(),
+                "sin la opcion, BAD deberia fallar como siempre");
+        check(!existing.exists(),
+                "sin la opcion, el CSV parcial de BAD deberia borrarse");
+
         // ---- cancelacion entre tablas
         final AtomicInteger calls = new AtomicInteger();
         results = CsvExporter.export(fake, Arrays.asList("EMP", "DEPT"),
-                "", 0, dir, new CsvExporter.Progress() {
+                "", 0, dir, false, new CsvExporter.Progress() {
                     public boolean onProgress(String t, int i, int n, long rows) {
                         return calls.incrementAndGet() < 2; // cancela en la 2a
                     }
@@ -142,7 +175,7 @@ public final class SelfTest {
         // (sin ';' final) y se vuelca a un unico CSV
         results = CsvExporter.exportQuery(fake,
                 "  SELECT id, nombre FROM otra WHERE x > 0;  ",
-                0, dir, "puntual", null);
+                0, dir, "puntual", false, null);
         check(results.size() == 1 && results.get(0).isOk(),
                 "la consulta personalizada fallo: " + results.get(0).getError());
         check("SELECT id, nombre FROM otra WHERE x > 0".equals(executedSql[0]),
@@ -154,7 +187,7 @@ public final class SelfTest {
                 "deberia existir puntual.csv");
 
         results = CsvExporter.exportQuery(fake, "select 1 from dual",
-                0, dir, "  ", null);
+                0, dir, "  ", false, null);
         check("consulta.csv".equals(results.get(0).getFileName()),
                 "nombre vacio deberia dar consulta.csv");
 
@@ -171,11 +204,21 @@ public final class SelfTest {
                     "el error deberia pedir un SELECT: " + e.getMessage());
         }
         results = CsvExporter.exportQuery(fake, "DELETE FROM t",
-                0, dir, "x", null);
+                0, dir, "x", false, null);
         check(!results.get(0).isOk(),
                 "una consulta no-SELECT deberia devolver error sin ejecutar");
         check(!new File(dir, "x.csv").exists(),
                 "no deberia generarse CSV de una consulta invalida");
+
+        // la consulta personalizada tambien respeta el "no reemplazar":
+        // puntual.csv ya existe y no se vuelve a ejecutar el SELECT
+        executedSql[0] = null;
+        results = CsvExporter.exportQuery(fake, "SELECT 1 FROM dual",
+                0, dir, "puntual", true, null);
+        check(results.get(0).isSkipped(),
+                "la consulta con CSV ya existente deberia omitirse");
+        check(executedSql[0] == null,
+                "una consulta omitida no deberia ejecutar ningun SELECT");
 
         // ---- preset: ida y vuelta por JSON conservando todo el estado
         ExportPreset src = new ExportPreset();
@@ -183,6 +226,7 @@ public final class SelfTest {
         src.setDirectory("C:\\salida\\csv");
         src.setWhere("ID > 1 AND NOMBRE LIKE 'A%'");
         src.setMaxRows(500);
+        src.setSkipExisting(true);
         src.setUseCustomQuery(true);
         src.setCustomQuery("SELECT id AS \"Mi Col\", nombre\nFROM v;");
         src.setCustomFileName("puntual");
@@ -194,8 +238,9 @@ public final class SelfTest {
                 "carpeta del preset mal leida");
         check("ID > 1 AND NOMBRE LIKE 'A%'".equals(back.getWhere()),
                 "where del preset mal leido");
-        check(back.getMaxRows() == 500 && back.isUseCustomQuery(),
-                "limite/modo del preset mal leidos");
+        check(back.getMaxRows() == 500 && back.isUseCustomQuery()
+                && back.isSkipExisting(),
+                "limite/modo/no-reemplazar del preset mal leidos");
         check(src.getCustomQuery().equals(back.getCustomQuery()),
                 "consulta del preset mal leida: " + back.getCustomQuery());
         check("puntual".equals(back.getCustomFileName()),
@@ -217,7 +262,7 @@ public final class SelfTest {
                 "{\"version\":2,\"tables\":\"T\",\"futuro\":{\"a\":1},"
                 + "\"lista\":[1,2]}");
         check("T".equals(parcial.getTables()) && parcial.getMaxRows() == 0
-                && !parcial.isUseCustomQuery(),
+                && !parcial.isUseCustomQuery() && !parcial.isSkipExisting(),
                 "preset parcial mal leido");
 
         // JSON invalido -> error claro en vez de un preset corrupto
@@ -239,6 +284,7 @@ public final class SelfTest {
         p1.setTables("EMP, BAD");           // BAD falla: el preset sigue
         p1.setWhere("ID > 1");
         p1.setMaxRows(2);
+        p1.setSkipExisting(true);           // los CSV ya hechos se omiten
         p1.setDirectory(out1.getAbsolutePath());
         p1.save(new File(batchDir, "a_tablas.json"));
 
@@ -281,7 +327,7 @@ public final class SelfTest {
             }
         };
         List<PresetBatch.PresetResult> batch =
-                PresetBatch.run(fake, presets, rec);
+                PresetBatch.run(fake, presets, false, rec);
         check(batch.size() == 4,
                 "deberia haber un resultado por preset, hubo " + batch.size());
         check(presetStarts.size() == 4
@@ -312,14 +358,36 @@ public final class SelfTest {
         check(batch.get(3).getError() != null,
                 "el preset sin tablas ni consulta deberia dar error");
 
+        // segunda pasada del lote: con skipExisting del preset, el CSV ya
+        // generado se omite (BAD sigue fallando: su CSV no existe)
+        batch = PresetBatch.run(fake, presets, false, null);
+        check(batch.get(0).getTables().get(0).isSkipped(),
+                "con skipExisting del preset, EMP ya descargada se omite");
+        check(!batch.get(0).getTables().get(1).isOk()
+                && !batch.get(0).getTables().get(1).isSkipped(),
+                "BAD deberia seguir fallando en la segunda pasada");
+        check(batch.get(1).getTables().get(0).isOk(),
+                "el preset de consulta (sin la opcion) reexporta su CSV");
+
+        // override del dialogo: TODO el lote omite los CSV existentes,
+        // aunque el preset no tenga la opcion guardada
+        batch = PresetBatch.run(fake, presets, true, null);
+        check(batch.get(0).getTables().get(0).isSkipped(),
+                "con el override, EMP deberia omitirse");
+        check(batch.get(1).getTables().get(0).isSkipped(),
+                "con el override, la consulta se omite aunque el preset "
+                        + "no tenga la opcion");
+
         // cancelacion: devolver false en el primer aviso (inicio del primer
         // preset) corta el lote sin ejecutar nada
-        batch = PresetBatch.run(fake, presets, new PresetBatch.Progress() {
-            public boolean onProgress(String presetFile, int pi, int pt,
-                                      String table, int i, int n, long rows) {
-                return false;
-            }
-        });
+        batch = PresetBatch.run(fake, presets, false,
+                new PresetBatch.Progress() {
+                    public boolean onProgress(String presetFile, int pi,
+                                              int pt, String table, int i,
+                                              int n, long rows) {
+                        return false;
+                    }
+                });
         check(batch.isEmpty(),
                 "al cancelar al inicio no deberia ejecutarse ningun preset");
 

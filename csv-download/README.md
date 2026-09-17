@@ -13,6 +13,12 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
 - Eliges la **carpeta de salida**; cada tabla genera un `<tabla>.csv`.
 - Opcionalmente aplicas a todas las tablas un **WHERE libre** y un
   **limite de filas** (0 = sin limite).
+- Marca **"No reemplazar los CSV que ya existen"** para omitir las tablas
+  cuyo `<tabla>.csv` ya este en la carpeta de salida: no se consultan ni
+  se tocan los archivos previos y en el resumen salen como `[OMITIDA]`.
+  Sirve para reanudar una descarga cancelada o con fallos sin repetir el
+  trabajo ya hecho. En el lote de presets, el checkbox fuerza la omision
+  en TODOS los presets ejecutados (ademas del flag guardado en cada JSON).
 - Alternativa puntual: activa **"Ejecutar consulta personalizada"**, pega tu
   `SELECT`/`WITH` y descarga su resultado a un unico CSV (el listado y el
   WHERE se ignoran; el limite sigue aplicando).

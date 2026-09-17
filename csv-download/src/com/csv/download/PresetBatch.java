@@ -119,16 +119,21 @@ public final class PresetBatch {
      * Ejecuta los presets indicados, en orden, sobre la misma conexion.
      * La lista de resultados se corta si el usuario cancela via
      * {@link Progress}.
+     *
+     * @param skipExisting true = omitir los CSV existentes en TODO el lote
+     *                     (se suma al "no reemplazar" propio de cada preset:
+     *                     basta con que uno de los dos lo pida)
      */
     public static List<PresetResult> run(Connection connection,
                                          List<File> presetFiles,
+                                         boolean skipExisting,
                                          Progress progress) {
         List<PresetResult> results = new ArrayList<PresetResult>();
         boolean[] cancelled = {false};
         int total = presetFiles.size();
         for (int i = 0; i < total; i++) {
             PresetResult result = runOne(connection, presetFiles.get(i),
-                    i + 1, total, progress, cancelled);
+                    i + 1, total, skipExisting, progress, cancelled);
             if (result != null) {
                 results.add(result);
             }
@@ -141,6 +146,7 @@ public final class PresetBatch {
 
     private static PresetResult runOne(Connection connection, File file,
                                        int presetIndex, int presetTotal,
+                                       boolean batchSkip,
                                        Progress progress,
                                        boolean[] cancelled) {
         List<CsvExporter.TableResult> none =
@@ -214,14 +220,15 @@ public final class PresetBatch {
             };
         }
 
+        boolean skipExisting = batchSkip || preset.isSkipExisting();
         if (preset.isUseCustomQuery()) {
             return new PresetResult(file.getName(), dir, null,
                     CsvExporter.exportQuery(connection, preset.getCustomQuery(),
                             preset.getMaxRows(), dir,
-                            preset.getCustomFileName(), inner));
+                            preset.getCustomFileName(), skipExisting, inner));
         }
         return new PresetResult(file.getName(), dir, null,
                 CsvExporter.export(connection, tables, preset.getWhere(),
-                        preset.getMaxRows(), dir, inner));
+                        preset.getMaxRows(), dir, skipExisting, inner));
     }
 }

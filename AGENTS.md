@@ -32,6 +32,10 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   comillas -> `quoteIfNeeded`), `fileNameFor` (sanitiza caracteres ilegales de
   Windows), `export` (lote: una tabla que falla no detiene el lote; cancelacion
   via `Progress` que devuelve false) y `escape`/celdas CSV.
+  `export`/`exportQuery` admiten `skipExisting`: si el CSV de salida ya existe
+  la tabla se omite SIN ejecutar el SELECT ni tocar el archivo (el resultado
+  queda `isSkipped()`: ni `isOk()` ni error, y el resumen la muestra como
+  `[OMITIDA]`). Sirve para reanudar lotes cancelados o con fallos.
 - Formato fijo: separador `;`, cabecera con nombres de columna, `"` para valores
   con separador/comillas/saltos (comillas internas duplicadas), NULL y BLOB como
   celda vacia (BLOB con aviso), numeros con punto decimal y fechas ISO tal cual
@@ -43,7 +47,8 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   `checkedQuery` (sin ';' final, comentarios iniciales OK), vuelca a UN CSV;
   reusa el mismo nucleo `runSelect` que las tablas.
 - Presets: `ExportPreset` guarda TODO el estado del dialogo (tablas, carpeta,
-  WHERE, limite, modo consulta, consulta y nombre de archivo) en JSON via
+  WHERE, limite, "no reemplazar CSV existentes", modo consulta, consulta y
+  nombre de archivo) en JSON via
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
   arrays/objetos anidados).
@@ -51,7 +56,9 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
   falla no detiene el lote. Se lanza con "Ejecutar presets de carpeta..." del
-  dialogo, que devuelve un `Request` con `isPresetBatch()`. Antes de cada
+  dialogo, que devuelve un `Request` con `isPresetBatch()`. El checkbox "no
+  reemplazar" del dialogo SI aplica al lote: `PresetBatch.run` recibe un
+  `skipExisting` que se suma (OR) al flag propio de cada preset. Antes de cada
   preset avisa al callback (con `table` vacia) y valida la conexion con
   `connection.isValid(5)`.
 - Progreso/cancelacion: `Progress.onProgress` se invoca al empezar cada tabla,
