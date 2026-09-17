@@ -143,6 +143,8 @@ public class CsvExportDialog extends JDialog {
     private final JTextField whereField = new JTextField(28);
     private final JTextField maxRowsField = new JTextField("0", 8);
     private Request request;
+    /** Ultimo preset cargado/guardado: destino por defecto al guardar. */
+    private File presetFile;
 
     private CsvExportDialog(Frame owner, String connectionName) {
         super(owner, "Descargar tablas a CSV", true);
@@ -309,7 +311,9 @@ public class CsvExportDialog extends JDialog {
             return;
         }
         try {
-            apply(ExportPreset.load(chooser.getSelectedFile()));
+            File file = chooser.getSelectedFile();
+            apply(ExportPreset.load(file));
+            presetFile = file;
         } catch (Exception e) {
             warn("No se pudo cargar el preset:\n" + e.getMessage());
         }
@@ -317,7 +321,12 @@ public class CsvExportDialog extends JDialog {
 
     private void savePreset() {
         JFileChooser chooser = presetChooser("Guardar preset de exportacion");
-        chooser.setSelectedFile(new File("export.json"));
+        if (presetFile != null) {
+            chooser.setCurrentDirectory(presetFile.getParentFile());
+            chooser.setSelectedFile(presetFile);
+        } else {
+            chooser.setSelectedFile(new File("export.json"));
+        }
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
@@ -327,6 +336,7 @@ public class CsvExportDialog extends JDialog {
         }
         try {
             toPreset().save(file);
+            presetFile = file;
         } catch (Exception e) {
             warn("No se pudo guardar el preset:\n" + e.getMessage());
         }
