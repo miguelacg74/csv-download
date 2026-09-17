@@ -160,10 +160,24 @@ public class CsvExportDialog extends JDialog {
      * que conexion se va a usar (puede ser null).
      */
     public static Request ask(Component parent, String connectionName) {
+        return ask(parent, connectionName, "");
+    }
+
+    /**
+     * Igual que {@link #ask(Component, String)} pero pre-rellena el listado
+     * de tablas (p.ej. con las tablas seleccionadas en el navegador de
+     * conexiones); el usuario puede editarlo antes de descargar.
+     */
+    public static Request ask(Component parent, String connectionName,
+                              String initialTables) {
         Frame owner = parent instanceof Frame
                 ? (Frame) parent
                 : (Frame) JOptionPane.getFrameForComponent(parent);
         CsvExportDialog dialog = new CsvExportDialog(owner, connectionName);
+        if (initialTables != null && !initialTables.trim().isEmpty()) {
+            dialog.tablesArea.setText(initialTables.trim());
+            dialog.tablesArea.setCaretPosition(0);
+        }
         dialog.setVisible(true);
         return dialog.request;
     }

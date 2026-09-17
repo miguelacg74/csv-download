@@ -8,6 +8,7 @@ import java.awt.event.ActionListener;
 import java.io.File;
 import java.sql.Connection;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -42,7 +43,8 @@ import oracle.ide.model.Element;
  *
  * Se puede invocar desde el menu Tools, el menu contextual del editor (usa
  * la conexion de la hoja de trabajo activa) o el menu contextual del
- * navegador de conexiones (usa la conexion del nodo seleccionado).
+ * navegador de conexiones (usa la conexion del nodo seleccionado y
+ * pre-rellena el listado con las tablas/vistas de la seleccion).
  * Desde el dialogo tambien se puede lanzar un lote de presets (*.json)
  * de una carpeta ({@link PresetBatch}) sobre la misma conexion.
  *
@@ -59,8 +61,9 @@ public class CsvDownloadController implements Controller {
         final Worksheet worksheet = worksheetOf(context);
 
         String connectionName = dbObject == null ? null : dbObject.getConnectionName();
-        CsvExportDialog.Request request =
-                CsvExportDialog.ask(Ide.getMainWindow(), connectionName);
+        String initialTables = joinComma(selectedObjectNames(context));
+        CsvExportDialog.Request request = CsvExportDialog.ask(
+                Ide.getMainWindow(), connectionName, initialTables);
         if (request == null) {
             return true;
         }
@@ -377,6 +380,67 @@ public class CsvDownloadController implements Controller {
             connection = connectionOf(worksheet);
         }
         return connection;
+    }
+
+    /**
+     * Nombres de las tablas/vistas de la seleccion del navegador
+     * (multiseleccion via {@link Context#getSelection()}), calificados con
+     * el esquema cuando se conoce. Lista vacia si la seleccion no contiene
+     * objetos exportables.
+     */
+    private static List<String> selectedObjectNames(Context context) {
+        LinkedHashSet<String> names = new LinkedHashSet<String>();
+        try {
+            Element[] selection = context == null
+                    ? null : context.getSelection();
+            if (selection == null || selection.length == 0) {
+                Element single = context == null
+                        ? null : context.getElement();
+                selection = single == null ? new Element[0]
+                        : new Element[]{single};
+            }
+            for (Element element : selection) {
+                addObjectName(element, names);
+            }
+        } catch (Throwable ignored) {
+            names.clear();
+        }
+        return new ArrayList<String>(names);
+    }
+
+    /** Anade el nombre del objeto a {@code names} si es tabla o vista. */
+    private static void addObjectName(Element element, Set<String> names) {
+        if (element == null) {
+            return;
+        }
+        try {
+            DBObject obj = new DBObject(element);
+            String type = obj.getObjectType();
+            String name = obj.getObjectName();
+            if (name == null || name.trim().isEmpty()) {
+                return;
+            }
+            if (!"TABLE".equalsIgnoreCase(type)
+                    && !"VIEW".equalsIgnoreCase(type)) {
+                return;
+            }
+            String schema = obj.getSchemaName();
+            names.add(schema == null || schema.trim().isEmpty()
+                    ? name : schema + "." + name);
+        } catch (Throwable ignored) {
+            // nodo que no representa un objeto exportable: se ignora
+        }
+    }
+
+    private static String joinComma(List<String> names) {
+        StringBuilder sb = new StringBuilder();
+        for (String name : names) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(name);
+        }
+        return sb.toString();
     }
 
     /** Objeto del navegador del contexto, o null si no lo hay. */

@@ -69,6 +69,11 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 - Menu contextual `db_nav` (always-enabled): `Context.getElement()` ->
   `new DBObject(element)` da `getConnectionName()`/`getConnection()`;
   `Connections.getInstance().getConnection(name)` abre por nombre.
+- Multiseleccion del navegador: `Context.getSelection()` devuelve
+  `Element[]` con TODOS los nodos marcados; cada uno se envuelve en
+  `DBObject` y los de tipo `TABLE`/`VIEW` (`getObjectType()`,
+  `getObjectName()`, `getSchemaName()`) pre-rellenan el listado del
+  dialogo (separados por comas, calificados con esquema si se conoce).
 - El controller prueba primero el nodo del navegador y luego la hoja; sin
   conexion muestra aviso. La accion aparece en cualquier nodo del navegador
   (es a proposito: no hay regla fiable para filtrar nodos "con conexion"

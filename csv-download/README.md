@@ -42,7 +42,10 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
 - **Tools -> Descargar tablas a CSV...** o clic derecho en el editor de la
   hoja de trabajo: usa la conexion de la hoja activa.
 - **Clic derecho en el navegador de conexiones** (sobre la conexion, una
-  tabla o cualquier nodo de ella): usa la conexion de ese nodo.
+  tabla o cualquier nodo de ella): usa la conexion de ese nodo. Si hay
+  varias tablas/vistas seleccionadas (Ctrl/clic o Mayus/clic), el listado
+  del dialogo se pre-rellena con sus nombres separados por comas
+  (calificados con esquema); se puede editar antes de descargar.
 
 ## Compilar e instalar (Windows)
 
