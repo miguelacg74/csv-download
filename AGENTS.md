@@ -52,6 +52,13 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
   arrays/objetos anidados).
+- Historial de presets: `PresetHistory` (Java puro) guarda en
+  `java.util.prefs` el MRU de presets cargados/guardados (maximo 10, el
+  ultimo primero) y las ultimas carpetas usadas (salida de CSV y carpeta
+  del lote de presets). El boton "Recientes" del dialogo despliega el MRU;
+  cargar o guardar un preset lo apunta, y elegir un preset borrado ofrece
+  quitarlo del historial. Si el almacen de preferencias no esta
+  disponible, `history` queda a null y el boton ni se muestra.
 - Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
@@ -88,9 +95,9 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 
 ## Sin dependencias externas
 
-`CsvExporter`, `ExportPreset`, `JsonUtil` y `PresetBatch` son Java puro
-(JDBC + colecciones + io): deben seguir compilando y ejecutandose SIN los
-jars de SQL Developer.
+`CsvExporter`, `ExportPreset`, `JsonUtil`, `PresetBatch` y
+`PresetHistory` son Java puro (JDBC + colecciones + io + prefs): deben
+seguir compilando y ejecutandose SIN los jars de SQL Developer.
 `CsvExportDialog` es Swing puro (recibe el padre por parametro). Solo
 `CsvDownloadController` usa APIs del IDE.
 Mantener esa frontera es lo que permite probar la logica fuera del IDE.

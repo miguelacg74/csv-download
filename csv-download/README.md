@@ -23,7 +23,11 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
   `SELECT`/`WITH` y descarga su resultado a un unico CSV (el listado y el
   WHERE se ignoran; el limite sigue aplicando).
 - Todo el estado del dialogo se puede **guardar/recargar como preset JSON**
-  (botones *Guardar preset...* / *Cargar preset...*).
+  (botones *Guardar preset...* / *Cargar preset...*). El boton
+  **Recientes** despliega un historial con los ultimos presets usados
+  para cargarlos en dos clics, sin volver a buscar la ruta; ademas se
+  recuerdan las ultimas carpetas usadas (salida de CSV y lote de
+  presets) como punto de partida de los selectores.
 - **Ejecucion en lote de presets**: *Ejecutar presets de carpeta...* corre
   todos los `*.json` de una carpeta (de tablas o de consulta, se mezclan
   libremente) sobre la misma conexion; cada preset vuelca a su propia
@@ -103,6 +107,8 @@ src/com/csv/download/
   ExportPreset.java           estado del dialogo <-> JSON (save/load)
   JsonUtil.java               serializador/parser JSON propio (sin librerias)
   PresetBatch.java            ejecucion en lote de presets de una carpeta
+  PresetHistory.java          historial MRU de presets y ultimas carpetas
+                              (java.util.prefs)
 META-INF/MANIFEST.MF       bundle OSGi
 META-INF/extension.xml     descriptor de la extension (accion + menus)
 test/SelfTest.java         prueba manual del exportador y los presets

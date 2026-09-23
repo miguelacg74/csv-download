@@ -1,6 +1,7 @@
 import com.csv.download.CsvExporter;
 import com.csv.download.ExportPreset;
 import com.csv.download.PresetBatch;
+import com.csv.download.PresetHistory;
 
 import java.io.File;
 import java.lang.reflect.InvocationHandler;
@@ -20,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.prefs.Preferences;
 
 /**
  * Prueba manual del exportador de CSV (no requiere SQL Developer).
@@ -272,6 +274,54 @@ public final class SelfTest {
         } catch (IllegalArgumentException e) {
             check(e.getMessage() != null && e.getMessage().contains("JSON"),
                     "el error deberia explicar que el JSON es invalido");
+        }
+
+        // ---- historial de presets recientes (MRU persistido en un
+        // nodo de preferencias aislado, que se borra al terminar)
+        Preferences testNode =
+                Preferences.userRoot().node("com/csv/download/selftest");
+        try {
+            PresetHistory history = new PresetHistory(testNode);
+            history.clear();
+            check(history.entries().isEmpty(),
+                    "el historial deberia quedar vacio tras clear");
+
+            File pa = new File(dir, "a.json").getAbsoluteFile();
+            File pb = new File(dir, "b.json").getAbsoluteFile();
+            history.add(pa);
+            history.add(pb);
+            check(history.entries().equals(Arrays.asList(pb, pa)),
+                    "el ultimo preset usado deberia ir primero: "
+                            + history.entries());
+            history.add(pa);
+            check(history.entries().equals(Arrays.asList(pa, pb)),
+                    "reanadir un preset deberia subirlo al frente: "
+                            + history.entries());
+            for (int i = 0; i < PresetHistory.MAX_ENTRIES + 5; i++) {
+                history.add(new File(dir, "extra" + i + ".json"));
+            }
+            check(history.entries().size() == PresetHistory.MAX_ENTRIES,
+                    "el historial deberia recortarse a "
+                            + PresetHistory.MAX_ENTRIES + " entradas");
+            history.remove(history.entries().get(0));
+            check(history.entries().size() == PresetHistory.MAX_ENTRIES - 1,
+                    "remove deberia sacar la entrada del historial");
+
+            // persistencia: otra instancia sobre el mismo nodo ve lo mismo
+            check(new PresetHistory(testNode).entries()
+                    .equals(history.entries()),
+                    "el historial no se conservo en las preferencias");
+
+            // ultimas carpetas recordadas (lote de presets y salida)
+            history.setLastBatchDirectory(new File("C:\\lotes"));
+            history.setLastOutputDirectory(new File("C:\\salida"));
+            PresetHistory reloaded = new PresetHistory(testNode);
+            check("C:\\lotes".equals(reloaded.lastBatchDirectory()),
+                    "la ultima carpeta de lote no se recordo");
+            check("C:\\salida".equals(reloaded.lastOutputDirectory()),
+                    "la ultima carpeta de salida no se recordo");
+        } finally {
+            testNode.removeNode();
         }
 
         // ---- lote de presets: cada preset vuelca a su propia carpeta

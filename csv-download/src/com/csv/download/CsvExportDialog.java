@@ -19,8 +19,10 @@ import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -38,7 +40,9 @@ import javax.swing.filechooser.FileNameExtensionFilter;
  *
  * El estado completo se puede guardar/recargar como preset JSON
  * ({@link ExportPreset}) con los botones "Guardar preset..."/"Cargar
- * preset...".
+ * preset...". El boton "Recientes" despliega el historial de los
+ * ultimos presets usados ({@link PresetHistory}) para cargarlos sin
+ * tener que buscar de nuevo la ruta del archivo.
  *
  * Modo lote: "Ejecutar presets de carpeta..." ejecuta todos los presets
  * (*.json) de una carpeta elegida por el usuario ({@link PresetBatch}),
@@ -161,6 +165,8 @@ public class CsvExportDialog extends JDialog {
     private Request request;
     /** Ultimo preset cargado/guardado: destino por defecto al guardar. */
     private File presetFile;
+    /** Historial de presets recientes; null si no hay persistencia. */
+    private final PresetHistory history = createHistory();
 
     private CsvExportDialog(Frame owner, String connectionName) {
         super(owner, "Descargar tablas a CSV", true);
@@ -268,14 +274,25 @@ public class CsvExportDialog extends JDialog {
                 savePreset();
             }
         });
+        presets.add(load);
+        presets.add(save);
+        if (history != null) {
+            final JButton recent = new JButton("Recientes");
+            recent.setToolTipText(
+                    "Ultimos presets cargados o guardados");
+            recent.addActionListener(new ActionListener() {
+                public void actionPerformed(ActionEvent e) {
+                    showHistoryMenu(recent);
+                }
+            });
+            presets.add(recent);
+        }
         JButton batch = new JButton("Ejecutar presets de carpeta...");
         batch.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 runPresetFolder();
             }
         });
-        presets.add(load);
-        presets.add(save);
         presets.add(batch);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
@@ -326,6 +343,9 @@ public class CsvExportDialog extends JDialog {
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setDialogTitle("Carpeta de salida para los CSV");
         String current = dirField.getText().trim();
+        if (current.isEmpty() && history != null) {
+            current = history.lastOutputDirectory();
+        }
         if (!current.isEmpty()) {
             chooser.setCurrentDirectory(new File(current));
         }
@@ -341,12 +361,85 @@ public class CsvExportDialog extends JDialog {
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
+        loadPresetFile(chooser.getSelectedFile());
+    }
+
+    /** Carga el preset indicado y lo apunta en el historial. */
+    private void loadPresetFile(File file) {
         try {
-            File file = chooser.getSelectedFile();
             apply(ExportPreset.load(file));
             presetFile = file;
+            if (history != null) {
+                history.add(file);
+            }
         } catch (Exception e) {
             warn("No se pudo cargar el preset:\n" + e.getMessage());
+            forgetIfMissing(file);
+        }
+    }
+
+    /**
+     * Menu desplegable del boton "Recientes": los ultimos presets
+     * usados (los mas recientes primero) y la opcion de vaciar el
+     * historial.
+     */
+    private void showHistoryMenu(JButton source) {
+        List<File> files = history.entries();
+        JPopupMenu menu = new JPopupMenu();
+        if (files.isEmpty()) {
+            JMenuItem empty = new JMenuItem("(sin presets recientes)");
+            empty.setEnabled(false);
+            menu.add(empty);
+        } else {
+            for (final File file : files) {
+                JMenuItem item = new JMenuItem(menuLabel(file));
+                item.setToolTipText(file.getAbsolutePath());
+                item.addActionListener(new ActionListener() {
+                    public void actionPerformed(ActionEvent e) {
+                        loadPresetFile(file);
+                    }
+                });
+                menu.add(item);
+            }
+            menu.addSeparator();
+            JMenuItem clear = new JMenuItem("Limpiar historial");
+            clear.addActionListener(new ActionListener() {
+                public void actionPerformed(ActionEvent e) {
+                    history.clear();
+                }
+            });
+            menu.add(clear);
+        }
+        menu.show(source, 0, source.getHeight());
+    }
+
+    /** Etiqueta del menu: nombre del preset y su carpeta (acortada). */
+    private static String menuLabel(File file) {
+        File parent = file.getParentFile();
+        if (parent == null) {
+            return file.getName();
+        }
+        String path = parent.getAbsolutePath();
+        if (path.length() > 45) {
+            path = path.substring(0, 20) + "..."
+                    + path.substring(path.length() - 22);
+        }
+        return file.getName() + "   (" + path + ")";
+    }
+
+    /**
+     * Si un preset del historial ya no existe en disco, ofrece
+     * sacarlo de la lista de recientes.
+     */
+    private void forgetIfMissing(File file) {
+        if (history == null || file.isFile()) {
+            return;
+        }
+        if (JOptionPane.showConfirmDialog(this,
+                "El archivo ya no existe. ¿Quitarlo del historial?",
+                getTitle(), JOptionPane.YES_NO_OPTION)
+                == JOptionPane.YES_OPTION) {
+            history.remove(file);
         }
     }
 
@@ -368,17 +461,42 @@ public class CsvExportDialog extends JDialog {
         try {
             toPreset().save(file);
             presetFile = file;
+            if (history != null) {
+                history.add(file);
+            }
         } catch (Exception e) {
             warn("No se pudo guardar el preset:\n" + e.getMessage());
         }
     }
 
-    private static JFileChooser presetChooser(String title) {
-        JFileChooser chooser = new JFileChooser();
+    private JFileChooser presetChooser(String title) {
+        File start = presetStartDir();
+        JFileChooser chooser = start == null
+                ? new JFileChooser() : new JFileChooser(start);
         chooser.setDialogTitle(title);
         chooser.setFileFilter(
                 new FileNameExtensionFilter("Preset JSON (*.json)", "json"));
         return chooser;
+    }
+
+    /**
+     * Carpeta inicial de los selectores de preset: la del ultimo
+     * preset cargado/guardado o, en su defecto, la del preset mas
+     * reciente del historial.
+     */
+    private File presetStartDir() {
+        if (presetFile != null && presetFile.getParentFile() != null) {
+            return presetFile.getParentFile();
+        }
+        if (history != null) {
+            for (File file : history.entries()) {
+                File parent = file.getParentFile();
+                if (parent != null && parent.isDirectory()) {
+                    return parent;
+                }
+            }
+        }
+        return null;
     }
 
     /**
@@ -391,6 +509,12 @@ public class CsvExportDialog extends JDialog {
         JFileChooser chooser = new JFileChooser();
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setDialogTitle("Carpeta con presets (*.json)");
+        if (history != null) {
+            String last = history.lastBatchDirectory();
+            if (!last.isEmpty()) {
+                chooser.setCurrentDirectory(new File(last));
+            }
+        }
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
             return;
         }
@@ -398,6 +522,9 @@ public class CsvExportDialog extends JDialog {
         if (files.isEmpty()) {
             warn("La carpeta elegida no contiene presets (*.json).");
             return;
+        }
+        if (history != null) {
+            history.setLastBatchDirectory(chooser.getSelectedFile());
         }
         StringBuilder list = new StringBuilder();
         int shown = Math.min(files.size(), 15);
@@ -483,6 +610,9 @@ public class CsvExportDialog extends JDialog {
         if (dir == null) {
             return;
         }
+        if (history != null) {
+            history.setLastOutputDirectory(dir);
+        }
 
         int maxRows;
         try {
@@ -536,5 +666,17 @@ public class CsvExportDialog extends JDialog {
     private void warn(String message) {
         JOptionPane.showMessageDialog(this, message, getTitle(),
                 JOptionPane.WARNING_MESSAGE);
+    }
+
+    /**
+     * Historial del usuario; null si el almacen de preferencias no
+     * esta disponible (el boton "Recientes" ni siquiera se muestra).
+     */
+    private static PresetHistory createHistory() {
+        try {
+            return PresetHistory.userDefault();
+        } catch (Throwable e) {
+            return null;
+        }
     }
 }
