@@ -27,6 +27,7 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import javax.swing.text.JTextComponent;
 
 /**
  * Dialogo modal de entrada para la descarga de tablas a CSV: listado de
@@ -205,6 +206,11 @@ public class CsvExportDialog extends JDialog {
     }
 
     private void build(String connectionName) {
+        for (JTextComponent c : new JTextComponent[]{
+                tablesArea, queryArea, customFileField, dirField,
+                whereField, maxRowsField}) {
+            EditPopup.install(c);
+        }
         JPanel form = new JPanel(new GridBagLayout());
         form.setBorder(BorderFactory.createEmptyBorder(12, 12, 6, 12));
         GridBagConstraints g = new GridBagConstraints();

@@ -274,6 +274,7 @@ public class CsvDownloadController implements Controller {
 
         JTextArea area = new JTextArea(head + text.toString(), 16, 60);
         area.setEditable(false);
+        EditPopup.install(area);
         area.setCaretPosition(0);
         JScrollPane scroll = new JScrollPane(area);
 
@@ -361,6 +362,7 @@ public class CsvDownloadController implements Controller {
 
         JTextArea area = new JTextArea(head + text.toString(), 18, 60);
         area.setEditable(false);
+        EditPopup.install(area);
         area.setCaretPosition(0);
         JScrollPane scroll = new JScrollPane(area);
         int icon = totalErrors > 0 ? JOptionPane.WARNING_MESSAGE

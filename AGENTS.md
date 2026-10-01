@@ -59,6 +59,12 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   cargar o guardar un preset lo apunta, y elegir un preset borrado ofrece
   quitarlo del historial. Si el almacen de preferencias no esta
   disponible, `history` queda a null y el boton ni se muestra.
+- Menu contextual de edicion: `EditPopup.install(JTextComponent)` (Swing
+  puro) añade Cortar/Copiar/Pegar/Seleccionar todo con estados
+  habilitado/deshabilitados segun seleccion, editabilidad y contenido del
+  portapapeles. El dialogo lo instala en sus 6 campos de texto y el
+  controller en las areas de resumen (solo lectura: solo Copiar y
+  Seleccionar todo quedan utiles).
 - Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
@@ -98,7 +104,8 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 `CsvExporter`, `ExportPreset`, `JsonUtil`, `PresetBatch` y
 `PresetHistory` son Java puro (JDBC + colecciones + io + prefs): deben
 seguir compilando y ejecutandose SIN los jars de SQL Developer.
-`CsvExportDialog` es Swing puro (recibe el padre por parametro). Solo
+`CsvExportDialog` y `EditPopup` son Swing puro (el dialogo recibe el
+padre por parametro). Solo
 `CsvDownloadController` usa APIs del IDE.
 Mantener esa frontera es lo que permite probar la logica fuera del IDE.
 

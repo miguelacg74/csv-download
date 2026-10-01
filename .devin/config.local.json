@@ -10,7 +10,11 @@
       "Exec($JAVAP)",
       "Exec(jdk/jre/bin/javap.exe)",
       "Exec(mkdir)",
-      "Exec(\"C:/app/sqldeveloper/jdk/jre/bin/javac.exe\")"
+      "Exec(\"C:/app/sqldeveloper/jdk/jre/bin/javac.exe\")",
+      "Exec(head)",
+      "Exec(javac)",
+      "Exec(cmd)",
+      "Exec(cp)"
     ]
   }
 }
