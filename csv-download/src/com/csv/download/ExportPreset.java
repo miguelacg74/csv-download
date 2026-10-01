@@ -9,8 +9,8 @@ import java.util.Map;
 
 /**
  * Preset de la descarga: el estado del dialogo (listado de tablas, carpeta,
- * WHERE, limite de filas, filas por archivo y consulta personalizada)
- * guardado como JSON en un archivo
+ * WHERE, ORDER BY, limite de filas, filas por archivo, reanudar y consulta
+ * personalizada) guardado como JSON en un archivo
  * {@code *.json} para recargarlo despues.
  *
  * El JSON se escribe y se lee con {@link JsonUtil} (no hay libreria JSON en
@@ -25,9 +25,11 @@ public final class ExportPreset {
     private String tables = "";
     private String directory = "";
     private String where = "";
+    private String orderBy = "";
     private int maxRows;
     private int rowsPerFile;
     private boolean skipExisting;
+    private boolean resume;
     private boolean useCustomQuery;
     private String customQuery = "";
     private String customFileName = "";
@@ -59,6 +61,14 @@ public final class ExportPreset {
         this.where = where == null ? "" : where;
     }
 
+    public String getOrderBy() {
+        return orderBy;
+    }
+
+    public void setOrderBy(String orderBy) {
+        this.orderBy = orderBy == null ? "" : orderBy;
+    }
+
     public int getMaxRows() {
         return maxRows;
     }
@@ -81,6 +91,14 @@ public final class ExportPreset {
 
     public void setSkipExisting(boolean skipExisting) {
         this.skipExisting = skipExisting;
+    }
+
+    public boolean isResume() {
+        return resume;
+    }
+
+    public void setResume(boolean resume) {
+        this.resume = resume;
     }
 
     public boolean isUseCustomQuery() {
@@ -114,9 +132,11 @@ public final class ExportPreset {
         values.put("tables", tables);
         values.put("directory", directory);
         values.put("where", where);
+        values.put("orderBy", orderBy);
         values.put("maxRows", maxRows);
         values.put("rowsPerFile", rowsPerFile);
         values.put("skipExisting", skipExisting);
+        values.put("resume", resume);
         values.put("useCustomQuery", useCustomQuery);
         values.put("customQuery", customQuery);
         values.put("customFileName", customFileName);
@@ -133,9 +153,11 @@ public final class ExportPreset {
         preset.tables = value(values, "tables", "");
         preset.directory = value(values, "directory", "");
         preset.where = value(values, "where", "");
+        preset.orderBy = value(values, "orderBy", "");
         preset.maxRows = intValue(values.get("maxRows"), 0);
         preset.rowsPerFile = intValue(values.get("rowsPerFile"), 0);
         preset.skipExisting = "true".equals(values.get("skipExisting"));
+        preset.resume = "true".equals(values.get("resume"));
         preset.useCustomQuery = "true".equals(values.get("useCustomQuery"));
         preset.customQuery = value(values, "customQuery", "");
         preset.customFileName = value(values, "customFileName", "");

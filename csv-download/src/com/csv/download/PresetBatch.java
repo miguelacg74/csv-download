@@ -39,6 +39,15 @@ public final class PresetBatch {
          */
         default void onStatement(Statement statement) {
         }
+
+        /**
+         * Reenvio de {@link CsvExporter.Progress#onTotalRows(String, long)}:
+         * estimacion de filas de la tabla en curso (-1 = desconocida).
+         */
+        default void onTotalRows(String presetFile, int presetIndex,
+                                 int presetTotal, String table,
+                                 long estimatedRows) {
+        }
     }
 
     /** Resultado de ejecutar un preset del lote. */
@@ -223,6 +232,11 @@ public final class PresetBatch {
                     progress.onProgress(presetName, presetIndex, presetTotal,
                             table + " -> " + fileName, index, total, 0);
                 }
+
+                public void onTotalRows(String table, long estimatedRows) {
+                    progress.onTotalRows(presetName, presetIndex,
+                            presetTotal, table, estimatedRows);
+                }
             };
         }
 
@@ -231,11 +245,13 @@ public final class PresetBatch {
             return new PresetResult(file.getName(), dir, null,
                     CsvExporter.exportQuery(connection, preset.getCustomQuery(),
                             preset.getMaxRows(), preset.getRowsPerFile(), dir,
-                            preset.getCustomFileName(), skipExisting, inner));
+                            preset.getCustomFileName(), skipExisting,
+                            preset.isResume(), inner));
         }
         return new PresetResult(file.getName(), dir, null,
                 CsvExporter.export(connection, tables, preset.getWhere(),
-                        preset.getMaxRows(), preset.getRowsPerFile(), dir,
-                        skipExisting, inner));
+                        preset.getOrderBy(), preset.getMaxRows(),
+                        preset.getRowsPerFile(), dir, skipExisting,
+                        preset.isResume(), inner));
     }
 }

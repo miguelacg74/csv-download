@@ -1,13 +1,17 @@
 package com.csv.download;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.nio.charset.Charset;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
@@ -81,6 +85,16 @@ public final class CsvExporter {
          */
         default void onPart(String table, int index, int total,
                             int part, String fileName) {
+        }
+
+        /**
+         * Se invoca antes de cada {@code executeQuery} con la estimacion de
+         * filas de la tabla ({@code NUM_ROWS} de las estadisticas), para
+         * mostrar un porcentaje de avance; -1 = desconocida (vista,
+         * sinonimo, sin estadisticas o consulta personalizada).
+         * Implementacion vacia por defecto.
+         */
+        default void onTotalRows(String table, long estimatedRows) {
         }
     }
 
@@ -190,6 +204,20 @@ public final class CsvExporter {
      * "HR.EMP" -> HR.EMP; "miTabla" -> "miTabla"; 'HR."Mi Tabla"' se conserva.
      */
     public static String qualifiedName(String token) {
+        List<String> parts = splitNameParts(token);
+        StringBuilder qualified = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            String part = parts.get(i);
+            if (i > 0) {
+                qualified.append('.');
+            }
+            qualified.append(part.startsWith("\"") ? part : quoteIfNeeded(part));
+        }
+        return qualified.toString();
+    }
+
+    /** Partes de un nombre {@code ESQUEMA.TABLA}: corta en '.' fuera de comillas. */
+    private static List<String> splitNameParts(String token) {
         List<String> parts = new ArrayList<String>();
         StringBuilder current = new StringBuilder();
         boolean quoted = false;
@@ -206,16 +234,26 @@ public final class CsvExporter {
             }
         }
         parts.add(current.toString().trim());
+        return parts;
+    }
 
-        StringBuilder qualified = new StringBuilder();
-        for (int i = 0; i < parts.size(); i++) {
-            String part = parts.get(i);
-            if (i > 0) {
-                qualified.append('.');
+    /**
+     * Partes del nombre tal cual las guarda el diccionario de Oracle:
+     * las comilladas conservan el case (sin las comillas) y el resto se
+     * resuelven en mayusculas.
+     */
+    private static List<String> identifierParts(String token) {
+        List<String> resolved = new ArrayList<String>();
+        for (String part : splitNameParts(token)) {
+            if (part.length() >= 2 && part.startsWith("\"")
+                    && part.endsWith("\"")) {
+                resolved.add(part.substring(1, part.length() - 1)
+                        .replace("\"\"", "\""));
+            } else {
+                resolved.add(part.toUpperCase());
             }
-            qualified.append(part.startsWith("\"") ? part : quoteIfNeeded(part));
         }
-        return qualified.toString();
+        return resolved;
     }
 
     /**
@@ -257,6 +295,10 @@ public final class CsvExporter {
      *                 con {@link #parseTableList(String)})
      * @param where    condicion opcional aplicada a todas las tablas
      *                 (sin la palabra WHERE); vacia o null = tabla completa
+     * @param orderBy  orden opcional aplicado a todas las tablas (sin la
+     *                 palabra ORDER BY); vacio o null = sin orden.
+     *                 Recomendado con {@code resume}: sin un orden estable
+     *                 Oracle no garantiza el mismo orden entre ejecuciones
      * @param maxRows  maximo de filas por tabla; &lt;= 0 = sin limite
      * @param rowsPerFile maximo de filas por archivo: &gt; 0 reparte la
      *                 salida de cada tabla en {@code <tabla>_0001.csv},
@@ -268,17 +310,25 @@ public final class CsvExporter {
      * @param skipExisting true = omitir las tablas cuyo CSV ya existe en
      *                 {@code dir} (no se consultan ni se reemplazan; quedan
      *                 marcadas con {@link TableResult#isSkipped()})
+     * @param resume   true = continuar una exportacion partida anterior:
+     *                 si ya existen {@code <tabla>_0001.._000N.csv} se
+     *                 descartan las N*rowsPerFile primeras filas del
+     *                 ResultSet y se sigue escribiendo en la parte N+1
+     *                 (sin tocar las partes ya cerradas)
      * @param progress callback de progreso/cancelacion; null = sin callback
      * @return un TableResult por tabla, en el orden del listado; la lista se
      *         corta si el usuario cancela
      */
     public static List<TableResult> export(Connection connection,
                                            List<String> tables, String where,
+                                           String orderBy,
                                            int maxRows, int rowsPerFile,
                                            File dir, boolean skipExisting,
+                                           boolean resume,
                                            Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String condition = where == null ? "" : where.trim();
+        String order = orderBy == null ? "" : orderBy.trim();
         int index = 0;
         for (String token : tables) {
             index++;
@@ -287,11 +337,52 @@ public final class CsvExporter {
                 break;
             }
             String qualified = qualifiedName(token);
+            long estimated = progress == null ? -1
+                    : estimateRows(connection, token);
             results.add(exportTable(connection, token, qualified, condition,
-                    maxRows, rowsPerFile, dir, skipExisting, index,
-                    tables.size(), progress));
+                    order, maxRows, rowsPerFile, dir, skipExisting, resume,
+                    index, tables.size(), estimated, progress));
         }
         return results;
+    }
+
+    /**
+     * Estimacion de filas de una tabla via {@code NUM_ROWS} de las
+     * estadisticas ({@code USER_TABLES} o {@code ALL_TABLES} si el nombre
+     * va cualificado con esquema); -1 si no se puede estimar (vista,
+     * sinonimo, estadisticas ausentes o cualquier error). Solo alimenta la
+     * barra de progreso: nunca debe impedir la exportacion.
+     */
+    private static long estimateRows(Connection connection, String token) {
+        List<String> parts = identifierParts(token);
+        if (parts.isEmpty() || parts.size() > 2) {
+            return -1;
+        }
+        String sql = parts.size() == 2
+                ? "SELECT NUM_ROWS FROM ALL_TABLES"
+                        + " WHERE OWNER = ? AND TABLE_NAME = ?"
+                : "SELECT NUM_ROWS FROM USER_TABLES WHERE TABLE_NAME = ?";
+        PreparedStatement ps = null;
+        ResultSet rs = null;
+        try {
+            ps = connection.prepareStatement(sql);
+            int col = 1;
+            if (parts.size() == 2) {
+                ps.setString(col++, parts.get(0));
+            }
+            ps.setString(col, parts.get(parts.size() - 1));
+            rs = ps.executeQuery();
+            if (rs.next()) {
+                long n = rs.getLong(1);
+                return rs.wasNull() ? -1 : n;
+            }
+        } catch (Throwable ignored) {
+            // una estimacion fallida no debe impedir la exportacion
+        } finally {
+            closeQuietly(rs);
+            closeQuietly(ps);
+        }
+        return -1;
     }
 
     /**
@@ -304,12 +395,15 @@ public final class CsvExporter {
      *        vacio o null = "consulta.csv"
      * @param rowsPerFile como en {@link #export}: &gt; 0 parte la salida en
      *        {@code <nombre>_0001.csv}, {@code _0002}...
+     * @param resume como en {@link #export}: continua tras la ultima parte
+     *        existente (el orden estable depende del propio SELECT)
      */
     public static List<TableResult> exportQuery(Connection connection,
                                                 String sql, int maxRows,
                                                 int rowsPerFile, File dir,
                                                 String fileName,
                                                 boolean skipExisting,
+                                                boolean resume,
                                                 Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String checked;
@@ -324,7 +418,7 @@ public final class CsvExporter {
                 ? "consulta" : fileName;
         File out = new File(dir, fileNameFor(name));
         results.add(runSelect(connection, checked, maxRows, rowsPerFile, out,
-                out.getName(), 1, 1, skipExisting, progress));
+                out.getName(), 1, 1, skipExisting, resume, -1, progress));
         return results;
     }
 
@@ -373,15 +467,19 @@ public final class CsvExporter {
 
     private static TableResult exportTable(Connection connection, String token,
                                            String qualified, String where,
+                                           String orderBy,
                                            int maxRows, int rowsPerFile,
                                            File dir, boolean skipExisting,
-                                           int index, int total,
+                                           boolean resume, int index,
+                                           int total, long estimatedRows,
                                            Progress progress) {
         String sql = "SELECT * FROM " + qualified
-                + (where.isEmpty() ? "" : " WHERE " + where);
+                + (where.isEmpty() ? "" : " WHERE " + where)
+                + (orderBy.isEmpty() ? "" : " ORDER BY " + orderBy);
         File out = new File(dir, fileNameFor(token));
         return runSelect(connection, sql, maxRows, rowsPerFile, out,
-                qualified, index, total, skipExisting, progress);
+                qualified, index, total, skipExisting, resume,
+                estimatedRows, progress);
     }
 
     /**
@@ -391,6 +489,12 @@ public final class CsvExporter {
      * repitiendo la cabecera en cada parte; si solo se llego a una parte,
      * el archivo se renombra al nombre limpio {@code <base>.csv}.
      *
+     * Con {@code resume} y salida partida, las partes consecutivas ya
+     * existentes se conservan y sus filas se descartan del ResultSet sin
+     * escribirlas (reanudacion); si la ultima parte existente no llego a
+     * {@code rowsPerFile} filas, la exportacion anterior ya habia terminado
+     * y la tabla queda omitida sin ejecutar el SELECT.
+     *
      * Si se cancela o falla a mitad se borra solo la parte en curso y se
      * conservan las partes ya completas (quedan en
      * {@link TableResult#getFileNames()} con un aviso).
@@ -399,7 +503,8 @@ public final class CsvExporter {
                                          int maxRows, int rowsPerFile,
                                          File out, String label,
                                          int index, int total,
-                                         boolean skipExisting,
+                                         boolean skipExisting, boolean resume,
+                                         long estimatedRows,
                                          Progress progress) {
         File firstPart = rowsPerFile > 0 ? partFile(out, 1) : out;
         if (skipExisting && (out.isFile() || firstPart.isFile())) {
@@ -412,12 +517,37 @@ public final class CsvExporter {
                     Collections.singletonList(existing), 0, false, true,
                     null, new ArrayList<String>());
         }
+        // reanudar: partes consecutivas ya escritas en una ejecucion
+        // anterior; si la ultima no llego a rowsPerFile filas era la parte
+        // final de una exportacion ya completa
+        int existingParts = 0;
+        if (resume && rowsPerFile > 0) {
+            if (out.isFile()) {
+                return new TableResult(label,
+                        Collections.singletonList(out.getName()), 0,
+                        false, true, null, new ArrayList<String>());
+            }
+            while (partFile(out, existingParts + 1).isFile()) {
+                existingParts++;
+            }
+            if (existingParts > 0
+                    && dataRows(partFile(out, existingParts)) < rowsPerFile) {
+                return new TableResult(label,
+                        Collections.singletonList(
+                                partFile(out, existingParts).getName()),
+                        0, false, true, null, new ArrayList<String>());
+            }
+        }
         List<String> warnings = new ArrayList<String>();
         List<String> fileNames = new ArrayList<String>();
+        for (int k = 1; k <= existingParts; k++) {
+            fileNames.add(partFile(out, k).getName());
+        }
         Statement st = null;
         ResultSet rs = null;
         Writer writer = null;
-        File current = firstPart;
+        File current = rowsPerFile > 0
+                ? partFile(out, existingParts + 1) : out;
         long rows = 0;
         int rowsInPart = 0;
         boolean truncated = false;
@@ -439,19 +569,35 @@ public final class CsvExporter {
                     && !progress.onProgress(label, index, total, 0)) {
                 cancelled = true;
             } else {
+                if (progress != null) {
+                    progress.onTotalRows(label, estimatedRows);
+                }
                 rs = st.executeQuery(sql);
                 ResultSetMetaData md = rs.getMetaData();
                 int columns = md.getColumnCount();
 
-                writer = openWriter(current);
-                fileNames.add(current.getName());
-                writeHeader(writer, md, columns);
-                if (rowsPerFile > 0 && progress != null) {
-                    progress.onPart(label, index, total, 1,
-                            current.getName());
+                if (existingParts == 0) {
+                    // exportacion nueva: no pueden quedar partes _NNNN de
+                    // una ejecucion anterior mezcladas con las nuevas (el
+                    // SELECT ya fue bien, asi que borrar es seguro)
+                    if (rowsPerFile > 0) {
+                        for (int k = 1; partFile(out, k).isFile(); k++) {
+                            deleteQuietly(partFile(out, k));
+                        }
+                        deleteQuietly(out);
+                    }
+                    // una tabla vacia tambien genera su CSV (solo cabecera)
+                    writer = openWriter(current);
+                    fileNames.add(current.getName());
+                    writeHeader(writer, md, columns);
+                    if (rowsPerFile > 0 && progress != null) {
+                        progress.onPart(label, index, total, 1,
+                                current.getName());
+                    }
                 }
 
                 Set<String> warned = new LinkedHashSet<String>();
+                long pending = (long) existingParts * rowsPerFile;
                 while (rs.next()) {
                     rows++;
                     if (maxRows > 0 && rows > maxRows) {
@@ -459,23 +605,38 @@ public final class CsvExporter {
                         rows--;
                         break;
                     }
-                    if (rowsPerFile > 0 && rowsInPart >= rowsPerFile) {
-                        // parte llena: se cierra y se abre la siguiente
-                        // (solo si hay fila que escribir: nunca queda una
-                        // parte vacia con solo la cabecera)
-                        closeQuietly(writer);
-                        current = partFile(out, fileNames.size() + 1);
-                        writer = openWriter(current);
-                        fileNames.add(current.getName());
-                        writeHeader(writer, md, columns);
-                        rowsInPart = 0;
-                        if (progress != null) {
-                            progress.onPart(label, index, total,
-                                    fileNames.size(), current.getName());
+                    if (pending > 0) {
+                        // fila ya volcada a una parte existente: descartar
+                        pending--;
+                    } else {
+                        if (writer == null) {
+                            // reanudacion con filas nuevas: primera parte
+                            // a escribir (se abre aqui para no dejar una
+                            // parte vacia si ya no quedaban filas)
+                            writer = openWriter(current);
+                            fileNames.add(current.getName());
+                            writeHeader(writer, md, columns);
+                            if (progress != null) {
+                                progress.onPart(label, index, total,
+                                        fileNames.size(), current.getName());
+                            }
                         }
+                        if (rowsPerFile > 0 && rowsInPart >= rowsPerFile) {
+                            // parte llena: se cierra y se abre la siguiente
+                            closeQuietly(writer);
+                            current = partFile(out, fileNames.size() + 1);
+                            writer = openWriter(current);
+                            fileNames.add(current.getName());
+                            writeHeader(writer, md, columns);
+                            rowsInPart = 0;
+                            if (progress != null) {
+                                progress.onPart(label, index, total,
+                                        fileNames.size(), current.getName());
+                            }
+                        }
+                        writeRow(writer, rs, md, columns, warnings, warned);
+                        rowsInPart++;
                     }
-                    writeRow(writer, rs, md, columns, warnings, warned);
-                    rowsInPart++;
                     if (progress != null && rows % PROGRESS_EVERY_ROWS == 0
                             && !progress.onProgress(label, index, total, rows)) {
                         cancelled = true;
@@ -485,6 +646,22 @@ public final class CsvExporter {
                 if (truncated) {
                     warnings.add("Se exportaron solo " + maxRows + " filas de "
                             + label + "; el origen tiene mas datos.");
+                }
+                if (existingParts > 0) {
+                    if (pending > 0) {
+                        warnings.add("El origen devolvio menos filas que las "
+                                + "ya exportadas a las partes existentes; "
+                                + "los datos pudieron cambiar entre "
+                                + "ejecuciones.");
+                    } else if (fileNames.size() == existingParts) {
+                        warnings.add("No habia filas nuevas: la tabla ya "
+                                + "estaba exportada por completo.");
+                    } else {
+                        warnings.add("Reanudada tras " + existingParts
+                                + " parte(s): se omitieron "
+                                + ((long) existingParts * rowsPerFile)
+                                + " filas ya exportadas.");
+                    }
                 }
             }
         } catch (Exception e) {
@@ -501,7 +678,8 @@ public final class CsvExporter {
         }
         if (error != null || cancelled) {
             // la parte en curso quedo incompleta y se borra; las partes ya
-            // cerradas se conservan para no perder el trabajo hecho
+            // cerradas (propias o de una ejecucion anterior) se conservan
+            // para no perder el trabajo hecho
             fileNames.remove(current.getName());
             deleteQuietly(current);
             if (!fileNames.isEmpty()) {
@@ -521,6 +699,28 @@ public final class CsvExporter {
         }
         return new TableResult(label, fileNames, rows, truncated,
                 false, null, warnings);
+    }
+
+    /**
+     * Filas de datos de un CSV generado (lineas menos la cabecera). Solo se
+     * usa para saber si la ultima parte existente quedo llena o era el
+     * final de una exportacion ya terminada.
+     */
+    private static long dataRows(File file) {
+        long lines = 0;
+        BufferedReader reader = null;
+        try {
+            reader = new BufferedReader(new InputStreamReader(
+                    new FileInputStream(file), CHARSET));
+            while (reader.readLine() != null) {
+                lines++;
+            }
+        } catch (Throwable ignored) {
+            return 0;
+        } finally {
+            closeQuietly(reader);
+        }
+        return lines == 0 ? 0 : lines - 1;
     }
 
     /** {@code <base>.csv} -&gt; {@code <base>_0001.csv} para la parte N. */

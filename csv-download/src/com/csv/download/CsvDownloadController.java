@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import javax.swing.BorderFactory;
@@ -92,7 +93,14 @@ public class CsvDownloadController implements Controller {
         final AtomicReference<Statement> running =
                 new AtomicReference<Statement>();
         final JLabel status = new JLabel(" ");
-        final JDialog progress = progressDialog(status, cancelled, running);
+        final JProgressBar bar = new JProgressBar(0, 1000);
+        bar.setIndeterminate(true);
+        final JDialog progress = progressDialog(status, bar, cancelled,
+                running);
+        // estimacion de filas de la tabla en curso (-1 = desconocida) y
+        // momento de inicio: alimentan el % y las filas/segundo
+        final AtomicLong estimate = new AtomicLong(-1);
+        final long[] started = {System.nanoTime()};
 
         SwingWorker<Object, String> worker =
                 new SwingWorker<Object, String>() {
@@ -117,20 +125,33 @@ public class CsvDownloadController implements Controller {
                                                   int presetTotal,
                                                   String table, int index,
                                                   int total, long rows) {
-                            String message = "preset " + presetIndex + "/"
-                                    + presetTotal + " " + presetFile;
+                            StringBuilder message = new StringBuilder(
+                                    "preset " + presetIndex + "/"
+                                            + presetTotal + " " + presetFile);
                             if (table != null && !table.isEmpty()) {
-                                message += "  ::  " + table + "  (" + index
-                                        + "/" + total + ")"
-                                        + (rows > 0 ? "  " + rows + " filas"
-                                                : "");
+                                message.append("  ::  ").append(table)
+                                        .append("  (").append(index)
+                                        .append('/').append(total)
+                                        .append(')');
+                                message.append(progressText("", rows,
+                                        estimate.get(), started[0]));
                             }
-                            publish(message);
+                            publish(message.toString());
+                            updateBar(bar, rows, estimate.get());
                             return !cancelled.get();
                         }
 
                         public void onStatement(Statement statement) {
                             running.set(statement);
+                        }
+
+                        public void onTotalRows(String presetFile,
+                                                int presetIndex,
+                                                int presetTotal,
+                                                String table,
+                                                long estimatedRows) {
+                            showEstimate(bar, estimate, started,
+                                    estimatedRows);
                         }
                     };
                     presetResults = PresetBatch.run(connection,
@@ -141,8 +162,11 @@ public class CsvDownloadController implements Controller {
                 CsvExporter.Progress progress = new CsvExporter.Progress() {
                     public boolean onProgress(String table, int index,
                                               int total, long rows) {
-                        publish(table + "  (" + index + "/" + total + ")"
-                                + (rows > 0 ? "  " + rows + " filas" : ""));
+                        String prefix = table + "  (" + index + "/" + total
+                                + ")";
+                        publish(progressText(prefix, rows, estimate.get(),
+                                started[0]));
+                        updateBar(bar, rows, estimate.get());
                         return !cancelled.get();
                     }
 
@@ -155,6 +179,11 @@ public class CsvDownloadController implements Controller {
                         publish(table + "  (" + index + "/" + total
                                 + ")  ->  " + fileName);
                     }
+
+                    public void onTotalRows(String table,
+                                            long estimatedRows) {
+                        showEstimate(bar, estimate, started, estimatedRows);
+                    }
                 };
                 results = request.isUseCustomQuery()
                         ? CsvExporter.exportQuery(connection,
@@ -162,12 +191,14 @@ public class CsvDownloadController implements Controller {
                                 request.getRowsPerFile(),
                                 request.getDirectory(),
                                 request.getCustomFileName(),
-                                request.isSkipExisting(), progress)
+                                request.isSkipExisting(), request.isResume(),
+                                progress)
                         : CsvExporter.export(connection, request.getTables(),
-                                request.getWhere(), request.getMaxRows(),
-                                request.getRowsPerFile(),
+                                request.getWhere(), request.getOrderBy(),
+                                request.getMaxRows(), request.getRowsPerFile(),
                                 request.getDirectory(),
-                                request.isSkipExisting(), progress);
+                                request.isSkipExisting(), request.isResume(),
+                                progress);
                 return results;
             }
 
@@ -196,7 +227,60 @@ public class CsvDownloadController implements Controller {
         progress.setVisible(true);
     }
 
-    private static JDialog progressDialog(JLabel status,
+    /** Reset de la estimacion al empezar cada tabla (EDT via invokeLater). */
+    private static void showEstimate(final JProgressBar bar,
+                                     AtomicLong estimate, long[] started,
+                                     final long estimatedRows) {
+        estimate.set(estimatedRows);
+        started[0] = System.nanoTime();
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                bar.setIndeterminate(estimatedRows <= 0);
+                bar.setValue(0);
+            }
+        });
+    }
+
+    /** Sufijo del texto de progreso: % sobre la estimacion y filas/segundo. */
+    private static String progressText(String prefix, long rows,
+                                       long estimatedRows,
+                                       long startedNanos) {
+        StringBuilder text = new StringBuilder(prefix);
+        if (rows <= 0) {
+            return text.toString();
+        }
+        text.append("  ").append(rows).append(" filas");
+        if (estimatedRows > 0) {
+            text.append("  ~")
+                    .append(Math.min(100, rows * 100 / estimatedRows))
+                    .append('%');
+        }
+        long nanos = System.nanoTime() - startedNanos;
+        if (nanos > 0) {
+            long rate = rows * 1000000000L / nanos;
+            if (rate > 0) {
+                text.append("  (").append(rate).append(" filas/s)");
+            }
+        }
+        return text.toString();
+    }
+
+    /** Mueve la barra segun la estimacion (no-op si es desconocida). */
+    private static void updateBar(final JProgressBar bar, long rows,
+                                  long estimatedRows) {
+        if (estimatedRows <= 0) {
+            return;
+        }
+        final int value = (int) Math.min(1000, rows * 1000 / estimatedRows);
+        SwingUtilities.invokeLater(new Runnable() {
+            public void run() {
+                bar.setIndeterminate(false);
+                bar.setValue(value);
+            }
+        });
+    }
+
+    private static JDialog progressDialog(JLabel status, JProgressBar bar,
                                           final AtomicBoolean cancelled,
                                           final AtomicReference<Statement> running) {
         Frame owner = Ide.getMainWindow();
@@ -206,8 +290,6 @@ public class CsvDownloadController implements Controller {
         panel.add(new JLabel("Exportando tablas a CSV..."), BorderLayout.NORTH);
         status.setBorder(BorderFactory.createEmptyBorder(6, 0, 6, 0));
         panel.add(status, BorderLayout.CENTER);
-        JProgressBar bar = new JProgressBar();
-        bar.setIndeterminate(true);
         panel.add(bar, BorderLayout.SOUTH);
         JButton cancel = new JButton("Cancelar");
         cancel.addActionListener(new ActionListener() {

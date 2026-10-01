@@ -46,20 +46,37 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   `skipExisting` detecta tanto `<tabla>.csv` como `<tabla>_0001.csv`. El
   `TableResult` lleva `getFileNames()` con todos los CSV de la tabla;
   `getFileName()` devuelve el primero (o el existente omitido).
+- Reanudacion: `export`/`exportQuery` admiten `resume` (solo con
+  `rowsPerFile` > 0): las partes consecutivas ya existentes se conservan y
+  sus filas se descartan del ResultSet sin escribirse (sigue en `_000N+1`).
+  Si la ultima parte existente tiene menos de `rowsPerFile` filas de datos
+  era el final de una exportacion ya completa -> `[OMITIDA]` sin ejecutar
+  el SELECT; igual si existe `<tabla>.csv`. Sin `resume`, una exportacion
+  nueva borra las partes `_NNNN` viejas tras el `executeQuery` para no
+  dejar archivos obsoletos mezclados. Para datos coherentes entre
+  ejecuciones hace falta el `orderBy` libre (`SELECT * ... ORDER BY x`);
+  sin el, Oracle no garantiza el mismo orden entre dos ejecuciones.
+- Progreso con estimacion: `estimateRows` lee `NUM_ROWS` del diccionario
+  (`USER_TABLES`, o `ALL_TABLES` si el nombre va cualificado) y lo notifica
+  via `Progress.onTotalRows` (-1 = indeterminada: vistas, sinonimos o
+  consulta personalizada). El controller muestra `~%` y filas/s y pone la
+  barra determinada; nunca debe impedir la exportacion (todo try/catch).
 - Formato fijo: separador `;`, cabecera con nombres de columna, `"` para valores
   con separador/comillas/saltos (comillas internas duplicadas), NULL y BLOB como
   celda vacia (BLOB con aviso), numeros con punto decimal y fechas ISO tal cual
   JDBC, charset windows-1252, fin de linea `\r\n`.
-- Limite opcional: `setMaxRows(n+1)` para detectar truncado y avisar; WHERE libre
-  opcional aplicado a TODAS las tablas (una tabla sin esas columnas falla y el
-  lote sigue). El limite se combina con `rowsPerFile` (tope total repartido
-  entre partes).
+- Limite opcional: `setMaxRows(n+1)` para detectar truncado y avisar; WHERE y
+  ORDER BY libres opcionales aplicados a TODAS las tablas (una tabla sin esas
+  columnas falla y el lote sigue). El limite se combina con `rowsPerFile`
+  (tope total repartido entre partes) y con `resume` (las filas descartadas
+  cuentan para el tope).
 - Consulta personalizada (`exportQuery`): SELECT/WITH validado por
   `checkedQuery` (sin ';' final, comentarios iniciales OK), vuelca a UN CSV;
   reusa el mismo nucleo `runSelect` que las tablas.
 - Presets: `ExportPreset` guarda TODO el estado del dialogo (tablas, carpeta,
-  WHERE, limite, "filas por archivo", "no reemplazar CSV existentes", modo
-  consulta, consulta y nombre de archivo) en JSON via
+  WHERE, ORDER BY, limite, "filas por archivo", "no reemplazar CSV
+  existentes", "reanudar partes", modo consulta, consulta y nombre de
+  archivo) en JSON via
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
   arrays/objetos anidados).
