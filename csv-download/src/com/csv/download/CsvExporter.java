@@ -16,6 +16,7 @@ import java.sql.Timestamp;
 import java.sql.Types;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -72,24 +73,33 @@ public final class CsvExporter {
          */
         default void onStatement(Statement statement) {
         }
+
+        /**
+         * Se invoca al abrir cada parte cuando la salida se parte en varios
+         * archivos (filas por archivo &gt; 0): permite mostrar en el
+         * progreso el CSV en curso. Implementacion vacia por defecto.
+         */
+        default void onPart(String table, int index, int total,
+                            int part, String fileName) {
+        }
     }
 
     /** Resultado de la exportacion de una tabla. */
     public static final class TableResult {
 
         private final String table;
-        private final String fileName;
+        private final List<String> fileNames;
         private final long rows;
         private final boolean truncated;
         private final boolean skipped;
         private final String error;
         private final List<String> warnings;
 
-        private TableResult(String table, String fileName, long rows,
+        private TableResult(String table, List<String> fileNames, long rows,
                             boolean truncated, boolean skipped,
                             String error, List<String> warnings) {
             this.table = table;
-            this.fileName = fileName;
+            this.fileNames = fileNames;
             this.rows = rows;
             this.truncated = truncated;
             this.skipped = skipped;
@@ -102,11 +112,21 @@ public final class CsvExporter {
         }
 
         /**
-         * Nombre del CSV generado (o del existente si la tabla se omitio);
-         * null si la tabla fallo o se cancelo.
+         * Nombre del primer CSV de la tabla (o del existente si se omitio);
+         * null si no quedo ningun archivo.
          */
         public String getFileName() {
-            return fileName;
+            return fileNames.isEmpty() ? null : fileNames.get(0);
+        }
+
+        /**
+         * Nombres de todos los CSV de la tabla: varios si la salida se
+         * partio por filas ({@code <tabla>_0001.csv}, {@code _0002}...);
+         * las partes completas conservadas si se cancelo o fallo a mitad;
+         * el existente si se omitio. Vacia si no quedo ningun archivo.
+         */
+        public List<String> getFileNames() {
+            return fileNames;
         }
 
         public long getRows() {
@@ -137,7 +157,7 @@ public final class CsvExporter {
 
         /** True si el CSV se escribio en esta ejecucion. */
         public boolean isOk() {
-            return error == null && fileName != null && !skipped;
+            return error == null && !fileNames.isEmpty() && !skipped;
         }
     }
 
@@ -238,6 +258,12 @@ public final class CsvExporter {
      * @param where    condicion opcional aplicada a todas las tablas
      *                 (sin la palabra WHERE); vacia o null = tabla completa
      * @param maxRows  maximo de filas por tabla; &lt;= 0 = sin limite
+     * @param rowsPerFile maximo de filas por archivo: &gt; 0 reparte la
+     *                 salida de cada tabla en {@code <tabla>_0001.csv},
+     *                 {@code <tabla>_0002.csv}... (un solo SELECT en
+     *                 streaming; cada parte lleva su cabecera y, si la
+     *                 tabla cabe en una sola parte, el archivo queda con
+     *                 el nombre limpio {@code <tabla>.csv})
      * @param dir      carpeta de salida (debe existir)
      * @param skipExisting true = omitir las tablas cuyo CSV ya existe en
      *                 {@code dir} (no se consultan ni se reemplazan; quedan
@@ -248,8 +274,8 @@ public final class CsvExporter {
      */
     public static List<TableResult> export(Connection connection,
                                            List<String> tables, String where,
-                                           int maxRows, File dir,
-                                           boolean skipExisting,
+                                           int maxRows, int rowsPerFile,
+                                           File dir, boolean skipExisting,
                                            Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String condition = where == null ? "" : where.trim();
@@ -262,8 +288,8 @@ public final class CsvExporter {
             }
             String qualified = qualifiedName(token);
             results.add(exportTable(connection, token, qualified, condition,
-                    maxRows, dir, skipExisting, index, tables.size(),
-                    progress));
+                    maxRows, rowsPerFile, dir, skipExisting, index,
+                    tables.size(), progress));
         }
         return results;
     }
@@ -276,10 +302,13 @@ public final class CsvExporter {
      *
      * @param fileName nombre del CSV (se sanitiza con {@link #fileNameFor});
      *        vacio o null = "consulta.csv"
+     * @param rowsPerFile como en {@link #export}: &gt; 0 parte la salida en
+     *        {@code <nombre>_0001.csv}, {@code _0002}...
      */
     public static List<TableResult> exportQuery(Connection connection,
                                                 String sql, int maxRows,
-                                                File dir, String fileName,
+                                                int rowsPerFile, File dir,
+                                                String fileName,
                                                 boolean skipExisting,
                                                 Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
@@ -287,15 +316,15 @@ public final class CsvExporter {
         try {
             checked = checkedQuery(sql);
         } catch (SQLException e) {
-            results.add(new TableResult("consulta", null, 0, false, false,
-                    e.getMessage(), new ArrayList<String>()));
+            results.add(new TableResult("consulta", new ArrayList<String>(),
+                    0, false, false, e.getMessage(), new ArrayList<String>()));
             return results;
         }
         String name = fileName == null || fileName.trim().isEmpty()
                 ? "consulta" : fileName;
         File out = new File(dir, fileNameFor(name));
-        results.add(runSelect(connection, checked, maxRows, out, out.getName(),
-                1, 1, skipExisting, progress));
+        results.add(runSelect(connection, checked, maxRows, rowsPerFile, out,
+                out.getName(), 1, 1, skipExisting, progress));
         return results;
     }
 
@@ -344,33 +373,53 @@ public final class CsvExporter {
 
     private static TableResult exportTable(Connection connection, String token,
                                            String qualified, String where,
-                                           int maxRows, File dir,
-                                           boolean skipExisting, int index,
-                                           int total, Progress progress) {
+                                           int maxRows, int rowsPerFile,
+                                           File dir, boolean skipExisting,
+                                           int index, int total,
+                                           Progress progress) {
         String sql = "SELECT * FROM " + qualified
                 + (where.isEmpty() ? "" : " WHERE " + where);
         File out = new File(dir, fileNameFor(token));
-        return runSelect(connection, sql, maxRows, out, qualified,
-                index, total, skipExisting, progress);
+        return runSelect(connection, sql, maxRows, rowsPerFile, out,
+                qualified, index, total, skipExisting, progress);
     }
 
-    /** Nucleo comun: ejecuta el SELECT y vuelca el ResultSet al CSV. */
+    /**
+     * Nucleo comun: ejecuta UN solo SELECT y vuelca el ResultSet en
+     * streaming al CSV. Con {@code rowsPerFile} &gt; 0 el escritor rota de
+     * archivo cada tantas filas ({@code <base>_0001.csv}, {@code _0002}...),
+     * repitiendo la cabecera en cada parte; si solo se llego a una parte,
+     * el archivo se renombra al nombre limpio {@code <base>.csv}.
+     *
+     * Si se cancela o falla a mitad se borra solo la parte en curso y se
+     * conservan las partes ya completas (quedan en
+     * {@link TableResult#getFileNames()} con un aviso).
+     */
     private static TableResult runSelect(Connection connection, String sql,
-                                         int maxRows, File out,
-                                         String label, int index, int total,
+                                         int maxRows, int rowsPerFile,
+                                         File out, String label,
+                                         int index, int total,
                                          boolean skipExisting,
                                          Progress progress) {
-        if (skipExisting && out.isFile()) {
-            // el CSV ya existe: ni se consulta la tabla ni se toca el
-            // archivo (sirve para reanudar lotes cancelados o con fallos)
-            return new TableResult(label, out.getName(), 0, false, true,
+        File firstPart = rowsPerFile > 0 ? partFile(out, 1) : out;
+        if (skipExisting && (out.isFile() || firstPart.isFile())) {
+            // el CSV ya existe (entero o su primera parte): ni se consulta
+            // la tabla ni se toca el archivo (sirve para reanudar lotes
+            // cancelados o con fallos)
+            String existing = out.isFile() ? out.getName()
+                    : firstPart.getName();
+            return new TableResult(label,
+                    Collections.singletonList(existing), 0, false, true,
                     null, new ArrayList<String>());
         }
         List<String> warnings = new ArrayList<String>();
+        List<String> fileNames = new ArrayList<String>();
         Statement st = null;
         ResultSet rs = null;
         Writer writer = null;
+        File current = firstPart;
         long rows = 0;
+        int rowsInPart = 0;
         boolean truncated = false;
         boolean cancelled = false;
         String error = null;
@@ -394,9 +443,13 @@ public final class CsvExporter {
                 ResultSetMetaData md = rs.getMetaData();
                 int columns = md.getColumnCount();
 
-                writer = new BufferedWriter(new OutputStreamWriter(
-                        new FileOutputStream(out), CHARSET));
+                writer = openWriter(current);
+                fileNames.add(current.getName());
                 writeHeader(writer, md, columns);
+                if (rowsPerFile > 0 && progress != null) {
+                    progress.onPart(label, index, total, 1,
+                            current.getName());
+                }
 
                 Set<String> warned = new LinkedHashSet<String>();
                 while (rs.next()) {
@@ -406,7 +459,23 @@ public final class CsvExporter {
                         rows--;
                         break;
                     }
+                    if (rowsPerFile > 0 && rowsInPart >= rowsPerFile) {
+                        // parte llena: se cierra y se abre la siguiente
+                        // (solo si hay fila que escribir: nunca queda una
+                        // parte vacia con solo la cabecera)
+                        closeQuietly(writer);
+                        current = partFile(out, fileNames.size() + 1);
+                        writer = openWriter(current);
+                        fileNames.add(current.getName());
+                        writeHeader(writer, md, columns);
+                        rowsInPart = 0;
+                        if (progress != null) {
+                            progress.onPart(label, index, total,
+                                    fileNames.size(), current.getName());
+                        }
+                    }
                     writeRow(writer, rs, md, columns, warnings, warned);
+                    rowsInPart++;
                     if (progress != null && rows % PROGRESS_EVERY_ROWS == 0
                             && !progress.onProgress(label, index, total, rows)) {
                         cancelled = true;
@@ -430,18 +499,42 @@ public final class CsvExporter {
             closeQuietly(rs);
             closeQuietly(st);
         }
-        if (error != null) {
-            deleteQuietly(out);
-            return new TableResult(label, null, rows, false, false,
-                    error, warnings);
+        if (error != null || cancelled) {
+            // la parte en curso quedo incompleta y se borra; las partes ya
+            // cerradas se conservan para no perder el trabajo hecho
+            fileNames.remove(current.getName());
+            deleteQuietly(current);
+            if (!fileNames.isEmpty()) {
+                warnings.add("Se conservaron " + fileNames.size()
+                        + " parte(s) ya completas de " + label + ".");
+            }
+            return new TableResult(label, fileNames, rows, false, false,
+                    error != null ? error : "Cancelado por el usuario.",
+                    warnings);
         }
-        if (cancelled) {
+        if (rowsPerFile > 0 && fileNames.size() == 1) {
+            // una sola parte: se queda con el nombre limpio <tabla>.csv
             deleteQuietly(out);
-            return new TableResult(label, null, rows, false, false,
-                    "Cancelado por el usuario.", warnings);
+            if (firstPart.renameTo(out)) {
+                fileNames.set(0, out.getName());
+            }
         }
-        return new TableResult(label, out.getName(), rows, truncated,
+        return new TableResult(label, fileNames, rows, truncated,
                 false, null, warnings);
+    }
+
+    /** {@code <base>.csv} -&gt; {@code <base>_0001.csv} para la parte N. */
+    private static File partFile(File base, int part) {
+        String name = base.getName();
+        String stem = name.toLowerCase().endsWith(".csv")
+                ? name.substring(0, name.length() - 4) : name;
+        return new File(base.getParentFile(),
+                stem + "_" + String.format("%04d", part) + ".csv");
+    }
+
+    private static Writer openWriter(File file) throws IOException {
+        return new BufferedWriter(new OutputStreamWriter(
+                new FileOutputStream(file), CHARSET));
     }
 
     private static void writeHeader(Writer writer, ResultSetMetaData md,

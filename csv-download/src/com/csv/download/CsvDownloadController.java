@@ -149,15 +149,23 @@ public class CsvDownloadController implements Controller {
                     public void onStatement(Statement statement) {
                         running.set(statement);
                     }
+
+                    public void onPart(String table, int index, int total,
+                                       int part, String fileName) {
+                        publish(table + "  (" + index + "/" + total
+                                + ")  ->  " + fileName);
+                    }
                 };
                 results = request.isUseCustomQuery()
                         ? CsvExporter.exportQuery(connection,
                                 request.getCustomQuery(), request.getMaxRows(),
+                                request.getRowsPerFile(),
                                 request.getDirectory(),
                                 request.getCustomFileName(),
                                 request.isSkipExisting(), progress)
                         : CsvExporter.export(connection, request.getTables(),
                                 request.getWhere(), request.getMaxRows(),
+                                request.getRowsPerFile(),
                                 request.getDirectory(),
                                 request.isSkipExisting(), progress);
                 return results;
@@ -248,7 +256,7 @@ public class CsvDownloadController implements Controller {
             } else if (r.isOk()) {
                 ok++;
                 text.append("[OK]   ").append(r.getTable())
-                        .append(" -> ").append(r.getFileName())
+                        .append(" -> ").append(filesText(r))
                         .append(" (").append(r.getRows()).append(" filas")
                         .append(r.isTruncated() ? ", truncada" : "")
                         .append(")\n");
@@ -332,7 +340,7 @@ public class CsvDownloadController implements Controller {
                     csvOk++;
                     outDirs.add(preset.getOutputDir());
                     text.append("   [OK]   ").append(r.getTable())
-                            .append(" -> ").append(r.getFileName())
+                            .append(" -> ").append(filesText(r))
                             .append(" (").append(r.getRows())
                             .append(" filas")
                             .append(r.isTruncated() ? ", truncada" : "")
@@ -380,6 +388,20 @@ public class CsvDownloadController implements Controller {
         if (choice == JOptionPane.YES_OPTION) {
             openFolder(outDirs.iterator().next());
         }
+    }
+
+    /**
+     * Archivos de una tabla para el resumen: el nombre tal cual si es uno
+     * solo, o "N archivos: primero ... ultimo" si la salida se partio.
+     */
+    private static String filesText(CsvExporter.TableResult r) {
+        List<String> names = r.getFileNames();
+        if (names.size() <= 1) {
+            String single = r.getFileName();
+            return single == null ? "" : single;
+        }
+        return names.size() + " archivos: " + names.get(0) + " ... "
+                + names.get(names.size() - 1);
     }
 
     private static void openFolder(File dir) {

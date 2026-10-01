@@ -36,19 +36,30 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   la tabla se omite SIN ejecutar el SELECT ni tocar el archivo (el resultado
   queda `isSkipped()`: ni `isOk()` ni error, y el resumen la muestra como
   `[OMITIDA]`). Sirve para reanudar lotes cancelados o con fallos.
+- Salida partida: `export`/`exportQuery` admiten `rowsPerFile` (> 0 reparte
+  la salida de cada tabla en `<tabla>_0001.csv`, `_0002`... con cabecera en
+  cada parte, todo con UN solo SELECT en streaming — no hay paginacion). Si
+  la tabla cabe en una parte el archivo queda con el nombre limpio
+  `<tabla>.csv` (se renombra la unica `_0001` al cerrar). Si se cancela o
+  falla a mitad se borra solo la parte en curso y se conservan las partes
+  completas, que quedan en `TableResult.getFileNames()` (con aviso). El
+  `skipExisting` detecta tanto `<tabla>.csv` como `<tabla>_0001.csv`. El
+  `TableResult` lleva `getFileNames()` con todos los CSV de la tabla;
+  `getFileName()` devuelve el primero (o el existente omitido).
 - Formato fijo: separador `;`, cabecera con nombres de columna, `"` para valores
   con separador/comillas/saltos (comillas internas duplicadas), NULL y BLOB como
   celda vacia (BLOB con aviso), numeros con punto decimal y fechas ISO tal cual
   JDBC, charset windows-1252, fin de linea `\r\n`.
 - Limite opcional: `setMaxRows(n+1)` para detectar truncado y avisar; WHERE libre
   opcional aplicado a TODAS las tablas (una tabla sin esas columnas falla y el
-  lote sigue).
+  lote sigue). El limite se combina con `rowsPerFile` (tope total repartido
+  entre partes).
 - Consulta personalizada (`exportQuery`): SELECT/WITH validado por
   `checkedQuery` (sin ';' final, comentarios iniciales OK), vuelca a UN CSV;
   reusa el mismo nucleo `runSelect` que las tablas.
 - Presets: `ExportPreset` guarda TODO el estado del dialogo (tablas, carpeta,
-  WHERE, limite, "no reemplazar CSV existentes", modo consulta, consulta y
-  nombre de archivo) en JSON via
+  WHERE, limite, "filas por archivo", "no reemplazar CSV existentes", modo
+  consulta, consulta y nombre de archivo) en JSON via
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
   arrays/objetos anidados).
@@ -78,9 +89,11 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   antes de cada `executeQuery` y cada 200 filas; `Progress.onStatement` (hook
   opcional) expone el Statement en curso para que Cancelar llame a
   `st.cancel()` y corte un `executeQuery` largo/bloqueado (ORA-01013 se
-  reporta como "Cancelado por el usuario").
+  reporta como "Cancelado por el usuario"). `Progress.onPart` (hook opcional)
+  avisa al abrir cada parte cuando la salida esta partida.
 - En Windows un fichero abierto no se puede borrar: el CSV parcial de una tabla
-  fallida/cancelada se borra DESPUES del finally que cierra el Writer.
+  fallida/cancelada se borra DESPUES del finally que cierra el Writer (con
+  salida partida solo se borra la parte en curso; las completas se conservan).
 
 ## Puntos de entrada y conexion
 

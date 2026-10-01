@@ -14,7 +14,9 @@
       "Exec(head)",
       "Exec(javac)",
       "Exec(cmd)",
-      "Exec(cp)"
+      "Exec(cp)",
+      "Exec(\"C:/app/sqldeveloper/jdk/jre/bin/java.exe\")",
+      "Exec(rm)"
     ]
   }
 }

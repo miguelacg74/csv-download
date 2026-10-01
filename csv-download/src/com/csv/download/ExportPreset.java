@@ -9,7 +9,8 @@ import java.util.Map;
 
 /**
  * Preset de la descarga: el estado del dialogo (listado de tablas, carpeta,
- * WHERE, limite y consulta personalizada) guardado como JSON en un archivo
+ * WHERE, limite de filas, filas por archivo y consulta personalizada)
+ * guardado como JSON en un archivo
  * {@code *.json} para recargarlo despues.
  *
  * El JSON se escribe y se lee con {@link JsonUtil} (no hay libreria JSON en
@@ -18,13 +19,14 @@ import java.util.Map;
  */
 public final class ExportPreset {
 
-    private static final int VERSION = 1;
+    private static final int VERSION = 2;
     private static final Charset UTF8 = Charset.forName("UTF-8");
 
     private String tables = "";
     private String directory = "";
     private String where = "";
     private int maxRows;
+    private int rowsPerFile;
     private boolean skipExisting;
     private boolean useCustomQuery;
     private String customQuery = "";
@@ -63,6 +65,14 @@ public final class ExportPreset {
 
     public void setMaxRows(int maxRows) {
         this.maxRows = maxRows;
+    }
+
+    public int getRowsPerFile() {
+        return rowsPerFile;
+    }
+
+    public void setRowsPerFile(int rowsPerFile) {
+        this.rowsPerFile = rowsPerFile;
     }
 
     public boolean isSkipExisting() {
@@ -105,6 +115,7 @@ public final class ExportPreset {
         values.put("directory", directory);
         values.put("where", where);
         values.put("maxRows", maxRows);
+        values.put("rowsPerFile", rowsPerFile);
         values.put("skipExisting", skipExisting);
         values.put("useCustomQuery", useCustomQuery);
         values.put("customQuery", customQuery);
@@ -123,6 +134,7 @@ public final class ExportPreset {
         preset.directory = value(values, "directory", "");
         preset.where = value(values, "where", "");
         preset.maxRows = intValue(values.get("maxRows"), 0);
+        preset.rowsPerFile = intValue(values.get("rowsPerFile"), 0);
         preset.skipExisting = "true".equals(values.get("skipExisting"));
         preset.useCustomQuery = "true".equals(values.get("useCustomQuery"));
         preset.customQuery = value(values, "customQuery", "");

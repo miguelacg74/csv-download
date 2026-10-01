@@ -217,6 +217,12 @@ public final class PresetBatch {
                 public void onStatement(Statement statement) {
                     progress.onStatement(statement);
                 }
+
+                public void onPart(String table, int index, int total,
+                                   int part, String fileName) {
+                    progress.onProgress(presetName, presetIndex, presetTotal,
+                            table + " -> " + fileName, index, total, 0);
+                }
             };
         }
 
@@ -224,11 +230,12 @@ public final class PresetBatch {
         if (preset.isUseCustomQuery()) {
             return new PresetResult(file.getName(), dir, null,
                     CsvExporter.exportQuery(connection, preset.getCustomQuery(),
-                            preset.getMaxRows(), dir,
+                            preset.getMaxRows(), preset.getRowsPerFile(), dir,
                             preset.getCustomFileName(), skipExisting, inner));
         }
         return new PresetResult(file.getName(), dir, null,
                 CsvExporter.export(connection, tables, preset.getWhere(),
-                        preset.getMaxRows(), dir, skipExisting, inner));
+                        preset.getMaxRows(), preset.getRowsPerFile(), dir,
+                        skipExisting, inner));
     }
 }

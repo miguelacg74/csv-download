@@ -32,8 +32,9 @@ import javax.swing.text.JTextComponent;
 /**
  * Dialogo modal de entrada para la descarga de tablas a CSV: listado de
  * tablas (separadas por comas, punto y coma o saltos de linea), carpeta de
- * salida, condicion WHERE opcional aplicada a todas las tablas y limite de
- * filas opcional (0 = sin limite).
+ * salida, condicion WHERE opcional aplicada a todas las tablas, limite de
+ * filas opcional (0 = sin limite) y "filas por archivo" para repartir la
+ * salida de cada tabla en varios CSV secuenciales (0 = un solo archivo).
  *
  * Alternativa puntual: activando "Ejecutar consulta personalizada" se pega
  * un SELECT/WITH propio y se exporta su resultado a un unico CSV (el listado
@@ -62,6 +63,7 @@ public class CsvExportDialog extends JDialog {
         private final File directory;
         private final String where;
         private final int maxRows;
+        private final int rowsPerFile;
         private final boolean skipExisting;
         private final boolean useCustomQuery;
         private final String customQuery;
@@ -69,7 +71,7 @@ public class CsvExportDialog extends JDialog {
         private final List<File> presetFiles;
 
         private Request(List<String> tables, File directory, String where,
-                        int maxRows, boolean skipExisting,
+                        int maxRows, int rowsPerFile, boolean skipExisting,
                         boolean useCustomQuery,
                         String customQuery, String customFileName,
                         List<File> presetFiles) {
@@ -77,6 +79,7 @@ public class CsvExportDialog extends JDialog {
             this.directory = directory;
             this.where = where;
             this.maxRows = maxRows;
+            this.rowsPerFile = rowsPerFile;
             this.skipExisting = skipExisting;
             this.useCustomQuery = useCustomQuery;
             this.customQuery = customQuery;
@@ -93,7 +96,7 @@ public class CsvExportDialog extends JDialog {
          */
         public static Request forPresetBatch(List<File> presetFiles,
                                              boolean skipExisting) {
-            return new Request(null, null, "", 0, skipExisting, false, "",
+            return new Request(null, null, "", 0, 0, skipExisting, false, "",
                     "", presetFiles);
         }
 
@@ -114,6 +117,15 @@ public class CsvExportDialog extends JDialog {
         /** Maximo de filas por tabla; 0 = sin limite. */
         public int getMaxRows() {
             return maxRows;
+        }
+
+        /**
+         * Maximo de filas por archivo: &gt; 0 parte la salida de cada
+         * tabla en {@code <tabla>_0001.csv}, {@code _0002}...; 0 = un
+         * solo archivo por tabla.
+         */
+        public int getRowsPerFile() {
+            return rowsPerFile;
         }
 
         /**
@@ -161,6 +173,7 @@ public class CsvExportDialog extends JDialog {
             new JLabel("Condicion WHERE (opcional, para todas las tablas):");
     private final JTextField whereField = new JTextField(28);
     private final JTextField maxRowsField = new JTextField("0", 8);
+    private final JTextField rowsPerFileField = new JTextField("0", 8);
     private final JCheckBox skipCheck = new JCheckBox(
             "No reemplazar los CSV que ya existen (omite esas tablas)");
     private Request request;
@@ -208,7 +221,7 @@ public class CsvExportDialog extends JDialog {
     private void build(String connectionName) {
         for (JTextComponent c : new JTextComponent[]{
                 tablesArea, queryArea, customFileField, dirField,
-                whereField, maxRowsField}) {
+                whereField, maxRowsField, rowsPerFileField}) {
             EditPopup.install(c);
         }
         JPanel form = new JPanel(new GridBagLayout());
@@ -261,6 +274,8 @@ public class CsvExportDialog extends JDialog {
         JPanel limitPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         limitPanel.add(new JLabel("Maximo de filas por tabla (0 = sin limite):"));
         limitPanel.add(maxRowsField);
+        limitPanel.add(new JLabel("Filas por archivo (0 = un solo):"));
+        limitPanel.add(rowsPerFileField);
         addRow(form, g, row++, limitPanel);
         addRow(form, g, row++, skipCheck);
 
@@ -562,7 +577,8 @@ public class CsvExportDialog extends JDialog {
         preset.setTables(tablesArea.getText());
         preset.setDirectory(dirField.getText().trim());
         preset.setWhere(whereField.getText().trim());
-        preset.setMaxRows(parseMaxRows(0));
+        preset.setMaxRows(parseInt(maxRowsField, 0));
+        preset.setRowsPerFile(parseInt(rowsPerFileField, 0));
         preset.setSkipExisting(skipCheck.isSelected());
         preset.setUseCustomQuery(customCheck.isSelected());
         preset.setCustomQuery(queryArea.getText());
@@ -576,6 +592,7 @@ public class CsvExportDialog extends JDialog {
         dirField.setText(preset.getDirectory());
         whereField.setText(preset.getWhere());
         maxRowsField.setText(String.valueOf(preset.getMaxRows()));
+        rowsPerFileField.setText(String.valueOf(preset.getRowsPerFile()));
         skipCheck.setSelected(preset.isSkipExisting());
         customCheck.setSelected(preset.isUseCustomQuery());
         queryArea.setText(preset.getCustomQuery());
@@ -621,19 +638,22 @@ public class CsvExportDialog extends JDialog {
         }
 
         int maxRows;
+        int rowsPerFile;
         try {
             maxRows = Integer.parseInt(maxRowsField.getText().trim());
-            if (maxRows < 0) {
+            rowsPerFile = Integer.parseInt(rowsPerFileField.getText().trim());
+            if (maxRows < 0 || rowsPerFile < 0) {
                 throw new NumberFormatException();
             }
         } catch (NumberFormatException e) {
-            warn("El maximo de filas debe ser un entero >= 0 (0 = sin limite).");
+            warn("El maximo de filas y las filas por archivo deben ser\n"
+                    + "enteros >= 0 (0 = sin limite / un solo archivo).");
             return;
         }
 
         request = new Request(tables, dir, whereField.getText().trim(),
-                maxRows, skipCheck.isSelected(), custom, customQuery,
-                customFileName, null);
+                maxRows, rowsPerFile, skipCheck.isSelected(), custom,
+                customQuery, customFileName, null);
         dispose();
     }
 
@@ -661,9 +681,9 @@ public class CsvExportDialog extends JDialog {
         return dir;
     }
 
-    private int parseMaxRows(int fallback) {
+    private static int parseInt(JTextComponent field, int fallback) {
         try {
-            return Integer.parseInt(maxRowsField.getText().trim());
+            return Integer.parseInt(field.getText().trim());
         } catch (NumberFormatException e) {
             return fallback;
         }

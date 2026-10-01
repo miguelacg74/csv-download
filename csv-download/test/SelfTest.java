@@ -80,7 +80,7 @@ public final class SelfTest {
         File dir = Files.createTempDirectory("csvselftest").toFile();
 
         List<CsvExporter.TableResult> results =
-                CsvExporter.export(fake, Arrays.asList("EMP"), "", 0, dir,
+                CsvExporter.export(fake, Arrays.asList("EMP"), "", 0, 0, dir,
                         false, null);
         check(results.size() == 1, "deberia haber un resultado");
         CsvExporter.TableResult r = results.get(0);
@@ -104,7 +104,7 @@ public final class SelfTest {
 
         // ---- WHERE y limite aplicados a todas las tablas
         results = CsvExporter.export(fake, Arrays.asList("HR.EMP", "DEPT"),
-                "ID > 1", 2, dir, false, null);
+                "ID > 1", 2, 0, dir, false, null);
         check("SELECT * FROM DEPT WHERE ID > 1".equals(executedSql[0]),
                 "el WHERE no se aplico a todas las tablas: " + executedSql[0]);
         check(results.size() == 2 && results.get(0).isOk()
@@ -119,7 +119,7 @@ public final class SelfTest {
 
         // ---- una tabla que falla no detiene el lote
         results = CsvExporter.export(fake, Arrays.asList("BAD", "EMP"),
-                "", 0, dir, false, null);
+                "", 0, 0, dir, false, null);
         check(results.size() == 2, "deberia seguir tras el error");
         check(!results.get(0).isOk()
                 && results.get(0).getError().contains("ORA-00942"),
@@ -137,7 +137,7 @@ public final class SelfTest {
         Files.write(existing.toPath(), "previo\r\n".getBytes("windows-1252"));
         executedSql[0] = null;
         results = CsvExporter.export(fake, Arrays.asList("OTRA", "BAD"),
-                "", 0, dir, true, null);
+                "", 0, 0, dir, true, null);
         check(results.size() == 2, "deberia haber un resultado por tabla");
         check(results.get(0).isOk() && !results.get(0).isSkipped(),
                 "OTRA deberia exportarse con normalidad");
@@ -155,8 +155,8 @@ public final class SelfTest {
 
         // sin la opcion, un CSV existente se reemplaza como siempre
         // (y BAD sigue fallando y dejando el archivo borrado)
-        results = CsvExporter.export(fake, Arrays.asList("BAD"), "", 0, dir,
-                false, null);
+        results = CsvExporter.export(fake, Arrays.asList("BAD"), "", 0, 0,
+                dir, false, null);
         check(!results.get(0).isOk() && !results.get(0).isSkipped(),
                 "sin la opcion, BAD deberia fallar como siempre");
         check(!existing.exists(),
@@ -165,7 +165,7 @@ public final class SelfTest {
         // ---- cancelacion entre tablas
         final AtomicInteger calls = new AtomicInteger();
         results = CsvExporter.export(fake, Arrays.asList("EMP", "DEPT"),
-                "", 0, dir, false, new CsvExporter.Progress() {
+                "", 0, 0, dir, false, new CsvExporter.Progress() {
                     public boolean onProgress(String t, int i, int n, long rows) {
                         return calls.incrementAndGet() < 2; // cancela en la 2a
                     }
@@ -173,11 +173,101 @@ public final class SelfTest {
         check(results.size() == 1,
                 "al cancelar en la segunda tabla solo deberia quedar la primera");
 
+        // ---- salida partida en varios archivos ("filas por archivo" > 0):
+        // un solo SELECT vuelca a partes secuenciales, cada una con su
+        // cabecera; el limite total se reparte entre partes y, si la tabla
+        // cabe en una sola, el archivo queda con el nombre limpio
+        Object[][] many = new Object[450][3];
+        for (int i = 0; i < many.length; i++) {
+            many[i] = new Object[]{new BigDecimal(i + 1),
+                    "fila" + (i + 1), null};
+        }
+        Connection fakeMany = fakeConnection(many, executedSql);
+        File splitDir = Files.createTempDirectory("csvsplit").toFile();
+        try {
+            results = CsvExporter.export(fakeMany, Arrays.asList("GRANDE"),
+                    "", 0, 100, splitDir, false, null);
+            r = results.get(0);
+            check(r.isOk() && r.getRows() == 450,
+                    "la exportacion partida fallo: " + r.getError());
+            check(r.getFileNames().size() == 5,
+                    "450 filas en partes de 100 deberian dar 5 archivos: "
+                            + r.getFileNames());
+            check("GRANDE_0001.csv".equals(r.getFileName()),
+                    "el primer archivo deberia ser GRANDE_0001.csv: "
+                            + r.getFileName());
+            csv = readFile(new File(splitDir, "GRANDE_0001.csv"));
+            check(csv.split("\r\n").length == 101
+                    && csv.startsWith("ID;NOMBRE;FEC"),
+                    "la parte 1 deberia tener cabecera + 100 filas");
+            csv = readFile(new File(splitDir, "GRANDE_0005.csv"));
+            check(csv.split("\r\n").length == 51
+                    && csv.startsWith("ID;NOMBRE;FEC"),
+                    "la ultima parte deberia tener cabecera + 50 filas");
+
+            // el limite total se reparte entre partes (250 = 100+100+50)
+            results = CsvExporter.export(fakeMany, Arrays.asList("TOPE"),
+                    "", 250, 100, splitDir, false, null);
+            r = results.get(0);
+            check(r.isOk() && r.isTruncated() && r.getRows() == 250,
+                    "el limite deberia truncar a 250 filas repartidas");
+            check(r.getFileNames().size() == 3,
+                    "250 filas en partes de 100 deberian dar 3 archivos: "
+                            + r.getFileNames());
+
+            // si cabe en una sola parte queda el nombre limpio, sin _0001
+            results = CsvExporter.export(fake, Arrays.asList("EMP"), "",
+                    0, 100, splitDir, false, null);
+            r = results.get(0);
+            check(r.isOk() && "EMP.csv".equals(r.getFileName()),
+                    "una sola parte deberia quedar como EMP.csv: "
+                            + r.getFileName());
+            check(new File(splitDir, "EMP.csv").exists()
+                    && !new File(splitDir, "EMP_0001.csv").exists(),
+                    "no deberia quedar EMP_0001.csv suelto");
+
+            // cancelacion a mitad: se borra la parte incompleta y se
+            // conservan las ya cerradas (partes de 300: al cancelar en la
+            // fila 400 la parte 1 esta completa y la 2 a medias)
+            results = CsvExporter.export(fakeMany, Arrays.asList("CORTA"),
+                    "", 0, 300, splitDir, false,
+                    new CsvExporter.Progress() {
+                        public boolean onProgress(String t, int i, int n,
+                                                  long rows) {
+                            return rows < 400;
+                        }
+                    });
+            r = results.get(0);
+            check(!r.isOk() && r.getError() != null
+                    && r.getError().contains("Cancelado"),
+                    "la tabla deberia quedar cancelada: " + r.getError());
+            check(new File(splitDir, "CORTA_0001.csv").exists()
+                    && !new File(splitDir, "CORTA_0002.csv").exists(),
+                    "deberia conservarse la parte completa y borrarse "
+                            + "la incompleta");
+            check(r.getFileNames().equals(Arrays.asList("CORTA_0001.csv")),
+                    "el resultado deberia listar la parte conservada: "
+                            + r.getFileNames());
+
+            // "no reemplazar" detecta una exportacion partida previa por
+            // su primera parte y no llega a ejecutar el SELECT
+            executedSql[0] = null;
+            results = CsvExporter.export(fakeMany, Arrays.asList("CORTA"),
+                    "", 0, 300, splitDir, true, null);
+            check(results.get(0).isSkipped()
+                    && "CORTA_0001.csv".equals(results.get(0).getFileName()),
+                    "con CORTA_0001.csv existente deberia omitirse");
+            check(executedSql[0] == null,
+                    "una tabla omitida no deberia ejecutar el SELECT");
+        } finally {
+            deleteTree(splitDir);
+        }
+
         // ---- consulta personalizada: se ejecuta el SQL del usuario
         // (sin ';' final) y se vuelca a un unico CSV
         results = CsvExporter.exportQuery(fake,
                 "  SELECT id, nombre FROM otra WHERE x > 0;  ",
-                0, dir, "puntual", false, null);
+                0, 0, dir, "puntual", false, null);
         check(results.size() == 1 && results.get(0).isOk(),
                 "la consulta personalizada fallo: " + results.get(0).getError());
         check("SELECT id, nombre FROM otra WHERE x > 0".equals(executedSql[0]),
@@ -189,7 +279,7 @@ public final class SelfTest {
                 "deberia existir puntual.csv");
 
         results = CsvExporter.exportQuery(fake, "select 1 from dual",
-                0, dir, "  ", false, null);
+                0, 0, dir, "  ", false, null);
         check("consulta.csv".equals(results.get(0).getFileName()),
                 "nombre vacio deberia dar consulta.csv");
 
@@ -206,7 +296,7 @@ public final class SelfTest {
                     "el error deberia pedir un SELECT: " + e.getMessage());
         }
         results = CsvExporter.exportQuery(fake, "DELETE FROM t",
-                0, dir, "x", false, null);
+                0, 0, dir, "x", false, null);
         check(!results.get(0).isOk(),
                 "una consulta no-SELECT deberia devolver error sin ejecutar");
         check(!new File(dir, "x.csv").exists(),
@@ -216,7 +306,7 @@ public final class SelfTest {
         // puntual.csv ya existe y no se vuelve a ejecutar el SELECT
         executedSql[0] = null;
         results = CsvExporter.exportQuery(fake, "SELECT 1 FROM dual",
-                0, dir, "puntual", true, null);
+                0, 0, dir, "puntual", true, null);
         check(results.get(0).isSkipped(),
                 "la consulta con CSV ya existente deberia omitirse");
         check(executedSql[0] == null,
@@ -228,6 +318,7 @@ public final class SelfTest {
         src.setDirectory("C:\\salida\\csv");
         src.setWhere("ID > 1 AND NOMBRE LIKE 'A%'");
         src.setMaxRows(500);
+        src.setRowsPerFile(10000);
         src.setSkipExisting(true);
         src.setUseCustomQuery(true);
         src.setCustomQuery("SELECT id AS \"Mi Col\", nombre\nFROM v;");
@@ -240,9 +331,10 @@ public final class SelfTest {
                 "carpeta del preset mal leida");
         check("ID > 1 AND NOMBRE LIKE 'A%'".equals(back.getWhere()),
                 "where del preset mal leido");
-        check(back.getMaxRows() == 500 && back.isUseCustomQuery()
-                && back.isSkipExisting(),
-                "limite/modo/no-reemplazar del preset mal leidos");
+        check(back.getMaxRows() == 500 && back.getRowsPerFile() == 10000
+                && back.isUseCustomQuery() && back.isSkipExisting(),
+                "limite/filas por archivo/modo/no-reemplazar del preset "
+                        + "mal leidos");
         check(src.getCustomQuery().equals(back.getCustomQuery()),
                 "consulta del preset mal leida: " + back.getCustomQuery());
         check("puntual".equals(back.getCustomFileName()),
