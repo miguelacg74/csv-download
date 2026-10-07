@@ -31,6 +31,7 @@ import javax.swing.SwingWorker;
 
 import oracle.dbtools.raptor.utils.Connections;
 import oracle.dbtools.raptor.utils.DBObject;
+import oracle.dbtools.worksheet.editor.OpenWorksheetWizard;
 import oracle.dbtools.worksheet.editor.Worksheet;
 import oracle.ide.Context;
 import oracle.ide.Ide;
@@ -64,7 +65,8 @@ public class CsvDownloadController implements Controller {
         String connectionName = dbObject == null ? null : dbObject.getConnectionName();
         String initialTables = joinComma(selectedObjectNames(context));
         CsvExportDialog.Request request = CsvExportDialog.ask(
-                Ide.getMainWindow(), connectionName, initialTables);
+                Ide.getMainWindow(), connectionName, initialTables,
+                worksheetOpener(dbObject, worksheet));
         if (request == null) {
             return true;
         }
@@ -496,6 +498,49 @@ public class CsvDownloadController implements Controller {
                     "No se pudo abrir la carpeta:\n" + e.getMessage(),
                     TITLE, JOptionPane.WARNING_MESSAGE);
         }
+    }
+
+    // ------------------------------------------------------- hoja de trabajo
+
+    /**
+     * Destino del boton "Abrir en hoja SQL": abre una hoja de trabajo nueva
+     * sobre la conexion del contexto con el script. Null (boton oculto) si
+     * no se conoce el nombre de la conexion.
+     */
+    private static CsvExportDialog.ScriptOpener worksheetOpener(
+            DBObject dbObject, Worksheet worksheet) {
+        final String name = connectionNameOf(dbObject, worksheet);
+        if (name == null) {
+            return null;
+        }
+        return new CsvExportDialog.ScriptOpener() {
+            public void open(String script) throws Exception {
+                if (OpenWorksheetWizard.openNewTempWorksheet(name, script)
+                        == null) {
+                    throw new Exception("SQL Developer no devolvio la hoja"
+                            + " para la conexion '" + name + "'.");
+                }
+            }
+        };
+    }
+
+    /** Nombre de la conexion del nodo del navegador o, si no, de la hoja. */
+    private static String connectionNameOf(DBObject dbObject,
+                                           Worksheet worksheet) {
+        String name = null;
+        try {
+            name = dbObject == null ? null : dbObject.getConnectionName();
+        } catch (Throwable ignored) {
+            // se intenta con la hoja
+        }
+        if ((name == null || name.trim().isEmpty()) && worksheet != null) {
+            try {
+                name = worksheet.getConnectionName();
+            } catch (Throwable ignored) {
+                name = null;
+            }
+        }
+        return name == null || name.trim().isEmpty() ? null : name;
     }
 
     // ---------------------------------------------------------- conexiones

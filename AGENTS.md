@@ -93,6 +93,13 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   portapapeles. El dialogo lo instala en sus 6 campos de texto y el
   controller en las areas de resumen (solo lectura: solo Copiar y
   Seleccionar todo quedan utiles).
+- "Abrir en hoja SQL" (junto al checkbox de consulta personalizada): el
+  dialogo recibe un `CsvExportDialog.ScriptOpener` (null = boton oculto) y
+  le pasa la consulta personalizada o un `SELECT ...;` por tabla
+  (`CsvExporter.selectFor`, con WHERE/ORDER BY comunes); si abre, el dialogo
+  se cierra (es modal). El controller lo implementa con
+  `OpenWorksheetWizard.openNewTempWorksheet(connName, texto)` usando el
+  nombre de conexion del nodo del navegador o de la hoja activa.
 - Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que

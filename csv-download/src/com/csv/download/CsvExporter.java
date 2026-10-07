@@ -216,6 +216,20 @@ public final class CsvExporter {
         return qualified.toString();
     }
 
+    /**
+     * SELECT que se ejecuta para una tabla ya cualificada (ver
+     * {@link #qualifiedName(String)}); {@code where}/{@code orderBy}
+     * vacios o null se omiten.
+     */
+    public static String selectFor(String qualified, String where,
+                                   String orderBy) {
+        String condition = where == null ? "" : where.trim();
+        String order = orderBy == null ? "" : orderBy.trim();
+        return "SELECT * FROM " + qualified
+                + (condition.isEmpty() ? "" : " WHERE " + condition)
+                + (order.isEmpty() ? "" : " ORDER BY " + order);
+    }
+
     /** Partes de un nombre {@code ESQUEMA.TABLA}: corta en '.' fuera de comillas. */
     private static List<String> splitNameParts(String token) {
         List<String> parts = new ArrayList<String>();
@@ -473,9 +487,7 @@ public final class CsvExporter {
                                            boolean resume, int index,
                                            int total, long estimatedRows,
                                            Progress progress) {
-        String sql = "SELECT * FROM " + qualified
-                + (where.isEmpty() ? "" : " WHERE " + where)
-                + (orderBy.isEmpty() ? "" : " ORDER BY " + orderBy);
+        String sql = selectFor(qualified, where, orderBy);
         File out = new File(dir, fileNameFor(token));
         return runSelect(connection, sql, maxRows, rowsPerFile, out,
                 qualified, index, total, skipExisting, resume,

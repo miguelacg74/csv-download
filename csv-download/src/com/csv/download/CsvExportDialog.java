@@ -50,11 +50,24 @@ import javax.swing.text.JTextComponent;
  * (*.json) de una carpeta elegida por el usuario ({@link PresetBatch}),
  * cada uno con su propia carpeta de salida.
  *
+ * "Abrir en hoja SQL" lleva el script (la consulta personalizada o los
+ * SELECT que se ejecutarian para cada tabla) a una hoja de trabajo nueva
+ * via {@link ScriptOpener}; el boton solo aparece si se recibe uno.
+ *
  * Es Swing puro: recibe el padre por parametro y no usa APIs del IDE.
  */
 public class CsvExportDialog extends JDialog {
 
     private static final String DEFAULT_QUERY_FILE = "consulta";
+
+    /**
+     * Destino del boton "Abrir en hoja SQL" (lo implementa el controller
+     * con las APIs del IDE). Si lanza excepcion el dialogo avisa y sigue
+     * abierto.
+     */
+    public interface ScriptOpener {
+        void open(String script) throws Exception;
+    }
 
     /** Peticion validada por el dialogo, lista para {@link CsvExporter}. */
     public static final class Request {
@@ -205,9 +218,13 @@ public class CsvExportDialog extends JDialog {
     private File presetFile;
     /** Historial de presets recientes; null si no hay persistencia. */
     private final PresetHistory history = createHistory();
+    /** Destino de "Abrir en hoja SQL"; null oculta el boton. */
+    private final ScriptOpener scriptOpener;
 
-    private CsvExportDialog(Frame owner, String connectionName) {
+    private CsvExportDialog(Frame owner, String connectionName,
+                            ScriptOpener scriptOpener) {
         super(owner, "Descargar tablas a CSV", true);
+        this.scriptOpener = scriptOpener;
         build(connectionName);
         pack();
         setMinimumSize(new Dimension(520, getHeight()));
@@ -230,10 +247,21 @@ public class CsvExportDialog extends JDialog {
      */
     public static Request ask(Component parent, String connectionName,
                               String initialTables) {
+        return ask(parent, connectionName, initialTables, null);
+    }
+
+    /**
+     * Igual que {@link #ask(Component, String, String)} y ademas muestra el
+     * boton "Abrir en hoja SQL" si {@code scriptOpener} no es null.
+     */
+    public static Request ask(Component parent, String connectionName,
+                              String initialTables,
+                              ScriptOpener scriptOpener) {
         Frame owner = parent instanceof Frame
                 ? (Frame) parent
                 : (Frame) JOptionPane.getFrameForComponent(parent);
-        CsvExportDialog dialog = new CsvExportDialog(owner, connectionName);
+        CsvExportDialog dialog = new CsvExportDialog(owner, connectionName,
+                scriptOpener);
         if (initialTables != null && !initialTables.trim().isEmpty()) {
             dialog.tablesArea.setText(initialTables.trim());
             dialog.tablesArea.setCaretPosition(0);
@@ -270,7 +298,22 @@ public class CsvExportDialog extends JDialog {
                 toggleCustomMode();
             }
         });
-        addRow(form, g, row++, customCheck);
+        if (scriptOpener == null) {
+            addRow(form, g, row++, customCheck);
+        } else {
+            JPanel customPanel = new JPanel(new BorderLayout(4, 0));
+            customPanel.add(customCheck, BorderLayout.CENTER);
+            JButton toWorksheet = new JButton("Abrir en hoja SQL");
+            toWorksheet.setToolTipText("Lleva la consulta personalizada (o los"
+                    + " SELECT de las tablas) a una hoja de trabajo nueva");
+            toWorksheet.addActionListener(new ActionListener() {
+                public void actionPerformed(ActionEvent e) {
+                    openInWorksheet();
+                }
+            });
+            customPanel.add(toWorksheet, BorderLayout.EAST);
+            addRow(form, g, row++, customPanel);
+        }
         queryArea.setLineWrap(true);
         addRow(form, g, row++, new JScrollPane(queryArea));
 
@@ -386,6 +429,44 @@ public class CsvExportDialog extends JDialog {
         whereField.setEnabled(!custom);
         orderByLabel.setEnabled(!custom);
         orderByField.setEnabled(!custom);
+    }
+
+    /**
+     * Abre una hoja de trabajo nueva con el script del modo actual: la
+     * consulta personalizada tal cual o un SELECT por tabla (con el WHERE
+     * y el ORDER BY comunes). Si se abre, el dialogo se cierra para poder
+     * usar la hoja (el IDE queda bloqueado mientras el dialogo modal sigue
+     * visible).
+     */
+    private void openInWorksheet() {
+        String script = worksheetScript();
+        if (script.isEmpty()) {
+            warn(customCheck.isSelected()
+                    ? "Escribe la consulta personalizada."
+                    : "Escribe al menos una tabla (separadas por comas).");
+            return;
+        }
+        try {
+            scriptOpener.open(script);
+        } catch (Throwable e) {
+            warn("No se pudo abrir la hoja de trabajo:\n" + e.getMessage());
+            return;
+        }
+        dispose();
+    }
+
+    /** Script para la hoja SQL segun el modo; vacio si no hay nada. */
+    private String worksheetScript() {
+        if (customCheck.isSelected()) {
+            return queryArea.getText().trim();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String token : CsvExporter.parseTableList(tablesArea.getText())) {
+            sb.append(CsvExporter.selectFor(CsvExporter.qualifiedName(token),
+                    whereField.getText(), orderByField.getText()))
+                    .append(";\n");
+        }
+        return sb.toString();
     }
 
     private void chooseDirectory() {
