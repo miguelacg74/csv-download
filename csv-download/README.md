@@ -9,7 +9,9 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
 
 - Pegas o escribes un **listado de tablas separadas por comas** (tambien
   admite `;` y saltos de linea), con o sin esquema (`EMP`, `HR.EMP`,
-  `"Mi Tabla"`).
+  `"Mi Tabla"`). Sin comillas da igual mayusculas o minusculas (`table1`
+  = `TABLE1`, como en Oracle); usa comillas solo para tablas creadas con
+  minusculas o espacios (`"miTabla"`).
 - Eliges la **carpeta de salida**; cada tabla genera un `<tabla>.csv`.
 - Opcionalmente aplicas a todas las tablas un **WHERE libre** y un
   **limite de filas** (0 = sin limite).

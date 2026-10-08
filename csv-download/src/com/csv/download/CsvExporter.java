@@ -24,7 +24,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Exporta los datos de una lista de tablas a archivos CSV individuales
@@ -199,10 +201,14 @@ public final class CsvExporter {
 
     /**
      * Normaliza un nombre de tabla del listado a un identificador listo para
-     * SQL: cada parte separada por '.' (fuera de comillas) se pasa por
-     * {@link #quoteIfNeeded(String)}, respetando el texto del usuario
-     * (Oracle resuelve los identificadores sin comillas en mayusculas).
-     * "HR.EMP" -> HR.EMP; "miTabla" -> "miTabla"; 'HR."Mi Tabla"' se conserva.
+     * SQL, con la misma regla que Oracle: cada parte separada por '.'
+     * (fuera de comillas) que sea un identificador simple sin comillas se
+     * resuelve en mayusculas, sin importar como la escribio el usuario; las
+     * partes ya comilladas se conservan tal cual (unica forma de nombrar
+     * tablas creadas con minusculas o espacios) y el resto se entrecomilla
+     * con {@link #quoteIfNeeded(String)}.
+     * "hr.emp" -> HR.EMP; "table1" -> TABLE1; 'HR."Mi Tabla"' se conserva;
+     * "Mi Tabla" (sin comillas, con espacio) -> "Mi Tabla".
      */
     public static String qualifiedName(String token) {
         List<String> parts = splitNameParts(token);
@@ -212,10 +218,20 @@ public final class CsvExporter {
             if (i > 0) {
                 qualified.append('.');
             }
-            qualified.append(part.startsWith("\"") ? part : quoteIfNeeded(part));
+            if (part.startsWith("\"")) {
+                qualified.append(part);
+            } else if (SIMPLE_IDENTIFIER.matcher(part).matches()) {
+                qualified.append(part.toUpperCase(Locale.ROOT));
+            } else {
+                qualified.append(quoteIfNeeded(part));
+            }
         }
         return qualified.toString();
     }
+
+    /** Identificador Oracle valido sin comillas (en cualquier case). */
+    private static final Pattern SIMPLE_IDENTIFIER =
+            Pattern.compile("[A-Za-z][A-Za-z0-9_$#]*");
 
     /**
      * SELECT que se ejecuta para una tabla ya cualificada (ver
@@ -265,7 +281,7 @@ public final class CsvExporter {
                 resolved.add(part.substring(1, part.length() - 1)
                         .replace("\"\"", "\""));
             } else {
-                resolved.add(part.toUpperCase());
+                resolved.add(part.toUpperCase(Locale.ROOT));
             }
         }
         return resolved;

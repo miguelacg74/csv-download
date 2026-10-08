@@ -52,8 +52,14 @@ public final class SelfTest {
                 "qualifiedName con esquema mal armado");
         check("EMP".equals(CsvExporter.qualifiedName("EMP")),
                 "qualifiedName simple mal armado");
-        check("\"miTabla\"".equals(CsvExporter.qualifiedName("miTabla")),
-                "identificador case-sensitive sin comillas");
+        check("TABLE1".equals(CsvExporter.qualifiedName("table1")),
+                "un nombre en minusculas sin comillas deberia ir en mayusculas");
+        check("HR.EMP".equals(CsvExporter.qualifiedName("hr.Emp")),
+                "esquema y tabla sin comillas deberian ir en mayusculas");
+        check("\"miTabla\"".equals(CsvExporter.qualifiedName("\"miTabla\"")),
+                "un nombre comillado deberia conservar su case");
+        check("\"Mi Tabla\"".equals(CsvExporter.qualifiedName("Mi Tabla")),
+                "un nombre con espacios deberia entrecomillarse");
         check("HR.\"Mi Tabla\"".equals(CsvExporter.qualifiedName("HR.\"Mi Tabla\"")),
                 "parte ya comillada deberia conservarse");
         check("HR.EMP.csv".equals(CsvExporter.fileNameFor("HR.EMP")),

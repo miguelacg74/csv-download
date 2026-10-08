@@ -296,6 +296,7 @@ public class CsvExportDialog extends JDialog {
         if (initialTables != null && !initialTables.trim().isEmpty()) {
             dialog.tablesArea.setText(initialTables.trim());
             dialog.tablesArea.setCaretPosition(0);
+            EditPopup.clearHistory(dialog.tablesArea);
         }
         dialog.setVisible(true);
         return dialog.request;

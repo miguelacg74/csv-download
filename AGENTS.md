@@ -35,7 +35,8 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 
 - `CsvExporter` (Java puro): `parseTableList` (comas/`;`/saltos de linea,
   dedup case-insensitive), `qualifiedName` (partes separadas por '.' fuera de
-  comillas -> `quoteIfNeeded`), `fileNameFor` (sanitiza caracteres ilegales de
+  comillas; identificador simple sin comillas -> MAYUSCULAS como Oracle,
+  `table1` = `TABLE1`; comillado se conserva; resto -> `quoteIfNeeded`), `fileNameFor` (sanitiza caracteres ilegales de
   Windows), `export` (lote: una tabla que falla no detiene el lote; cancelacion
   via `Progress` que devuelve false) y `escape`/celdas CSV.
   `export`/`exportQuery` admiten `skipExisting`: si el CSV de salida ya existe
@@ -114,6 +115,12 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   cargar o guardar un preset lo apunta, y elegir un preset borrado ofrece
   quitarlo del historial. Si el almacen de preferencias no esta
   disponible, `history` queda a null y el boton ni se muestra.
+- Deshacer: Swing no lo trae de serie. `EditPopup.install` añade un
+  `UndoManager` por campo (Ctrl+Z, Ctrl+Y / Ctrl+Mayus+Z, agrupa rachas
+  de <800 ms) y Deshacer/Rehacer al menu. `install(c, false)` lo omite
+  (editor compartido de celdas en `VariablesDialog`).
+  `EditPopup.clearHistory(c)` tras rellenar por codigo (tablas
+  pre-rellenadas del navegador).
 - Menu contextual de edicion: `EditPopup.install(JTextComponent)` (Swing
   puro) añade Cortar/Copiar/Pegar/Seleccionar todo con estados
   habilitado/deshabilitados segun seleccion, editabilidad y contenido del

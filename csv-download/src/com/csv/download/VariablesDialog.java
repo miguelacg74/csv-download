@@ -251,7 +251,7 @@ final class VariablesDialog extends JDialog {
                 refreshPreview(row);
             }
             JTextField editorField = new JTextField();
-            EditPopup.install(editorField);
+            EditPopup.install(editorField, false);
             table.setDefaultEditor(Object.class,
                     new DefaultCellEditor(editorField));
             table.getColumnModel().getColumn(COL_TYPE).setCellEditor(
