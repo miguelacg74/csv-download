@@ -295,6 +295,8 @@ public class CsvDownloadController implements Controller {
         panel.add(status, BorderLayout.CENTER);
         panel.add(bar, BorderLayout.SOUTH);
         JButton cancel = new JButton("Cancelar");
+        cancel.setToolTipText("Corta la consulta en curso; se borra solo el"
+                + " CSV a medias y se conservan los ya terminados");
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 cancelled.set(true);

@@ -452,6 +452,40 @@ public final class SelfTest {
                 + "\"variables\":[]}").getTables()),
                 "un array de variables vacio deberia admitirse");
 
+        // archivo portable de variables globales (exportar/importar)
+        QueryVariables portable = src.getVariables();
+        File varsFile = File.createTempFile("variables", ".json");
+        try {
+            portable.saveFile(varsFile);
+            QueryVariables imported = QueryVariables.loadFile(varsFile);
+            check(portable.toJson().equals(imported.toJson()),
+                    "el archivo de variables no se reimporta igual: "
+                            + imported.toJson());
+        } finally {
+            varsFile.delete();
+        }
+        check(portable.toFileJson().contains("\""
+                        + QueryVariables.FILE_FORMAT + "\""),
+                "el archivo de variables deberia llevar su formato");
+        check(QueryVariables.fromFileJson("\uFEFF"
+                        + portable.toFileJson()).getVariables().size() == 2,
+                "el BOM de Windows deberia tolerarse al importar");
+        check(QueryVariables.fromFileJson(src.toJson()).get("DESDE") != null,
+                "deberia poder importarse desde un preset");
+        check(QueryVariables.fromFileJson(portable.toJson())
+                        .getVariables().size() == 2,
+                "deberia admitirse un array suelto de variables");
+        check(QueryVariables.EMPTY.toFileJson().length() > 0
+                && QueryVariables.fromFileJson(
+                        QueryVariables.EMPTY.toFileJson()).isEmpty(),
+                "un archivo sin variables deberia leerse vacio");
+        try {
+            QueryVariables.fromFileJson("{\"tables\":\"T\"}");
+            check(false, "un JSON sin 'variables' deberia rechazarse");
+        } catch (IllegalArgumentException expected) {
+            // ok
+        }
+
         // preset guardado y leido de disco
         File presetFile = File.createTempFile("preset", ".json");
         try {

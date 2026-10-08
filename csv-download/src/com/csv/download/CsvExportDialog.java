@@ -307,6 +307,7 @@ public class CsvExportDialog extends JDialog {
                 whereField, orderByField, maxRowsField, rowsPerFileField}) {
             EditPopup.install(c);
         }
+        installFieldTips();
         JPanel form = new JPanel(new GridBagLayout());
         form.setBorder(BorderFactory.createEmptyBorder(12, 12, 6, 12));
         GridBagConstraints g = new GridBagConstraints();
@@ -358,6 +359,7 @@ public class CsvExportDialog extends JDialog {
         JPanel dirPanel = new JPanel(new BorderLayout(4, 0));
         dirPanel.add(dirField, BorderLayout.CENTER);
         JButton browse = new JButton("Examinar...");
+        browse.setToolTipText("Elige la carpeta de salida con el explorador");
         browse.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 chooseDirectory();
@@ -385,12 +387,16 @@ public class CsvExportDialog extends JDialog {
 
         JPanel presets = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         JButton load = new JButton("Cargar preset...");
+        load.setToolTipText("Rellena todo el dialogo desde un preset .json"
+                + " guardado antes");
         load.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 loadPreset();
             }
         });
         JButton save = new JButton("Guardar preset...");
+        save.setToolTipText("Guarda todo el dialogo (tablas, carpeta, filtros,"
+                + " opciones y variables del preset) en un .json");
         save.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 savePreset();
@@ -410,7 +416,8 @@ public class CsvExportDialog extends JDialog {
             presets.add(recent);
         }
         variablesButton.setToolTipText("Variables :NOMBRE (texto, numero,"
-                + " fecha) para usar en el WHERE, ORDER BY o la consulta");
+                + " fecha) para usar en el WHERE, ORDER BY o la consulta;"
+                + " las globales se pueden exportar/importar");
         variablesButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 editVariables();
@@ -419,6 +426,8 @@ public class CsvExportDialog extends JDialog {
         updateVariablesButton();
         presets.add(variablesButton);
         JButton batch = new JButton("Ejecutar presets de carpeta...");
+        batch.setToolTipText("Ejecuta en lote todos los presets .json de una"
+                + " carpeta, cada uno con su propia carpeta de salida");
         batch.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 runPresetFolder();
@@ -428,12 +437,15 @@ public class CsvExportDialog extends JDialog {
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         JButton export = new JButton("Descargar");
+        export.setToolTipText("Valida los datos y exporta a CSV en segundo"
+                + " plano (se puede cancelar)");
         export.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 accept();
             }
         });
         JButton cancel = new JButton("Cancelar");
+        cancel.setToolTipText("Cierra el dialogo sin exportar");
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 dispose();
@@ -449,6 +461,38 @@ public class CsvExportDialog extends JDialog {
         getContentPane().setLayout(new BorderLayout());
         getContentPane().add(form, BorderLayout.CENTER);
         getContentPane().add(buttons, BorderLayout.SOUTH);
+    }
+
+    /** Tooltips de los campos y checkboxes (los botones los fijan al crearse). */
+    private void installFieldTips() {
+        tablesArea.setToolTipText("Tablas o vistas separadas por comas, ';' o"
+                + " saltos de linea; ESQUEMA.TABLA o \"Nombre\" entre comillas"
+                + " si distingue mayusculas");
+        customCheck.setToolTipText("Exporta el resultado de un SELECT/WITH"
+                + " propio a un unico CSV en lugar del listado de tablas");
+        queryArea.setToolTipText("SELECT o WITH sin ';' final; admite"
+                + " variables :NOMBRE");
+        customFileField.setToolTipText("Nombre del CSV de la consulta (.csv se"
+                + " anade si falta; los caracteres no validos pasan a '_')");
+        dirField.setToolTipText("Carpeta donde se escriben los CSV (se ofrece"
+                + " crearla si no existe)");
+        String where = "Sin la palabra WHERE; se aplica a TODAS las tablas"
+                + " (la que no tenga esas columnas falla y el lote sigue);"
+                + " admite variables :NOMBRE";
+        whereLabel.setToolTipText(where);
+        whereField.setToolTipText(where);
+        String order = "Sin ORDER BY; se aplica a TODAS las tablas. Necesario"
+                + " para que 'Reanudar' de datos coherentes";
+        orderByLabel.setToolTipText(order);
+        orderByField.setToolTipText(order);
+        maxRowsField.setToolTipText("Tope de filas por tabla; 0 = sin limite"
+                + " (si se corta, el resumen lo avisa)");
+        rowsPerFileField.setToolTipText("Reparte cada tabla en <tabla>_0001.csv,"
+                + " _0002... con cabecera en cada parte; 0 = un solo archivo");
+        skipCheck.setToolTipText("Si el CSV de una tabla ya existe en la"
+                + " carpeta, la omite sin consultar la base de datos");
+        resumeCheck.setToolTipText("Con 'Filas por archivo' > 0: conserva las"
+                + " partes ya descargadas y continua en la siguiente");
     }
 
     private void addRow(JPanel form, GridBagConstraints g, int row,

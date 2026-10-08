@@ -7,6 +7,8 @@ import java.awt.FlowLayout;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseEvent;
+import java.io.File;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -18,6 +20,7 @@ import javax.swing.DefaultCellEditor;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -29,7 +32,9 @@ import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.event.TableModelEvent;
 import javax.swing.event.TableModelListener;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.table.JTableHeader;
 
 /**
  * Dialogo modal para definir las variables de consulta
@@ -38,6 +43,11 @@ import javax.swing.table.DefaultTableModel;
  *    todas las exportaciones y lotes de presets.
  *  - Del preset: se guardan dentro del preset JSON y sobrescriben a las
  *    globales del mismo nombre.
+ *
+ * La pestana Globales tiene "Exportar..."/"Importar..." para llevar las
+ * variables a otro equipo en un archivo JSON portable
+ * ({@link QueryVariables#toFileJson()}); lo importado se fusiona en la
+ * tabla (gana el archivo) y solo se guarda al pulsar Aceptar.
  *
  * Cada fila tiene nombre, tipo, valor y descripcion; la columna "Valor
  * hoy" muestra como se resuelve el valor en este momento (util para los
@@ -52,6 +62,16 @@ final class VariablesDialog extends JDialog {
     private static final int COL_VALUE = 2;
     private static final int COL_DESCRIPTION = 3;
     private static final int COL_PREVIEW = 4;
+    private static final String[] COLUMN_TIPS = {
+            "Nombre sin ':' (letra inicial y luego letras, digitos o _);"
+                    + " se usa como :NOMBRE",
+            "Texto, Numero, Fecha o Fecha-hora: decide como se valida y se"
+                    + " enlaza el valor",
+            "Valor (numeros con punto decimal; fechas AAAA-MM-DD o relativas"
+                    + " como INICIO_MES-1M); vacio = NULL",
+            "Nota libre para recordar para que sirve la variable",
+            "Como se resuelve el valor ahora mismo (o el error si no es"
+                    + " valido); solo lectura"};
 
     /** Variables editadas en los dos ambitos. */
     static final class Result {
@@ -73,6 +93,11 @@ final class VariablesDialog extends JDialog {
         }
     }
 
+    /** Nombre propuesto al exportar las variables globales. */
+    private static final String DEFAULT_FILE = "variables-globales.json";
+    /** Ultima carpeta usada al exportar/importar (dura la sesion). */
+    private static File lastDirectory;
+
     private final VariableTable globalTable;
     private final VariableTable presetTable;
     private Result result;
@@ -86,12 +111,13 @@ final class VariablesDialog extends JDialog {
         presetTable.other = globalTable;
 
         JTabbedPane tabs = new JTabbedPane();
-        tabs.addTab("Globales", globalTable.panel("Copiar al preset"));
+        tabs.addTab("Globales", globalTable.panel("Copiar al preset", true));
         tabs.setToolTipTextAt(0, globalsPersist
                 ? "Se guardan en tus preferencias y aplican a todas las"
                         + " exportaciones y lotes de presets"
                 : "Solo duran esta sesion (no hay almacen de preferencias)");
-        tabs.addTab("Del preset", presetTable.panel("Copiar a globales"));
+        tabs.addTab("Del preset", presetTable.panel("Copiar a globales",
+                false));
         tabs.setToolTipTextAt(1, "Se guardan con 'Guardar preset...' y"
                 + " sobrescriben a las globales del mismo nombre");
 
@@ -109,12 +135,16 @@ final class VariablesDialog extends JDialog {
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         JButton ok = new JButton("Aceptar");
+        ok.setToolTipText("Valida y aplica las variables de las dos"
+                + " pestanas (las globales se guardan en tus preferencias)");
         ok.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 accept();
             }
         });
         JButton cancel = new JButton("Cancelar");
+        cancel.setToolTipText("Cierra sin aplicar ningun cambio (incluidas"
+                + " las variables importadas)");
         cancel.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 dispose();
@@ -167,6 +197,11 @@ final class VariablesDialog extends JDialog {
         dispose();
     }
 
+    private void warn(String message) {
+        JOptionPane.showMessageDialog(this, message, getTitle(),
+                JOptionPane.WARNING_MESSAGE);
+    }
+
     /** Tabla editable de un ambito con sus botones. */
     private final class VariableTable {
 
@@ -178,7 +213,19 @@ final class VariablesDialog extends JDialog {
                 return column != COL_PREVIEW;
             }
         };
-        private final JTable table = new JTable(model);
+        private final JTable table = new JTable(model) {
+            @Override
+            protected JTableHeader createDefaultTableHeader() {
+                return new JTableHeader(columnModel) {
+                    @Override
+                    public String getToolTipText(MouseEvent e) {
+                        int view = columnAtPoint(e.getPoint());
+                        return view < 0 ? null : COLUMN_TIPS[
+                                convertColumnIndexToModel(view)];
+                    }
+                };
+            }
+        };
         private VariableTable other;
 
         VariableTable(QueryVariables variables) {
@@ -221,8 +268,10 @@ final class VariablesDialog extends JDialog {
             }
         }
 
-        JPanel panel(String copyLabel) {
+        JPanel panel(String copyLabel, boolean fileButtons) {
             JButton add = new JButton("Agregar");
+            add.setToolTipText("Anade una fila vacia y empieza a editar su"
+                    + " nombre");
             add.addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) {
                     stopEditing();
@@ -236,6 +285,7 @@ final class VariablesDialog extends JDialog {
                 }
             });
             JButton remove = new JButton("Quitar");
+            remove.setToolTipText("Elimina las filas seleccionadas");
             remove.addActionListener(new ActionListener() {
                 public void actionPerformed(ActionEvent e) {
                     stopEditing();
@@ -257,6 +307,28 @@ final class VariablesDialog extends JDialog {
             buttons.add(add);
             buttons.add(remove);
             buttons.add(copy);
+            if (fileButtons) {
+                JButton export = new JButton("Exportar...");
+                export.setToolTipText("Guarda las variables de esta tabla en"
+                        + " un archivo .json para llevarlas a otro equipo");
+                export.addActionListener(new ActionListener() {
+                    public void actionPerformed(ActionEvent e) {
+                        exportFile();
+                    }
+                });
+                JButton importButton = new JButton("Importar...");
+                importButton.setToolTipText("Carga variables de un archivo"
+                        + " .json (o de un preset): agrega las nuevas y"
+                        + " reemplaza las del mismo nombre. Pulsa Aceptar"
+                        + " para guardarlas");
+                importButton.addActionListener(new ActionListener() {
+                    public void actionPerformed(ActionEvent e) {
+                        importFile();
+                    }
+                });
+                buttons.add(export);
+                buttons.add(importButton);
+            }
 
             JPanel panel = new JPanel(new BorderLayout(0, 6));
             panel.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
@@ -265,6 +337,106 @@ final class VariablesDialog extends JDialog {
             panel.add(scroll, BorderLayout.CENTER);
             panel.add(buttons, BorderLayout.SOUTH);
             return panel;
+        }
+
+        /**
+         * Exporta las filas actuales (validadas, con lo editado y aun no
+         * aceptado) a un archivo portable.
+         */
+        private void exportFile() {
+            QueryVariables variables;
+            try {
+                variables = collect("Globales");
+            } catch (IllegalArgumentException e) {
+                warn(e.getMessage());
+                return;
+            }
+            if (variables.isEmpty()) {
+                warn("No hay variables que exportar.");
+                return;
+            }
+            JFileChooser chooser = fileChooser("Exportar variables globales");
+            chooser.setSelectedFile(new File(chooser.getCurrentDirectory(),
+                    DEFAULT_FILE));
+            if (chooser.showSaveDialog(VariablesDialog.this)
+                    != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            File file = chooser.getSelectedFile();
+            if (!file.getName().toLowerCase().endsWith(".json")) {
+                file = new File(file.getParentFile(), file.getName() + ".json");
+            }
+            if (file.exists() && JOptionPane.showConfirmDialog(
+                    VariablesDialog.this, "El archivo ya existe:\n" + file
+                            + "\n\n¿Reemplazarlo?", getTitle(),
+                    JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) {
+                return;
+            }
+            try {
+                variables.saveFile(file);
+                lastDirectory = file.getParentFile();
+                JOptionPane.showMessageDialog(VariablesDialog.this,
+                        "Se exportaron " + variables.getVariables().size()
+                                + " variable(s) a:\n" + file, getTitle(),
+                        JOptionPane.INFORMATION_MESSAGE);
+            } catch (Exception e) {
+                warn("No se pudo exportar:\n" + e.getMessage());
+            }
+        }
+
+        /**
+         * Importa un archivo de variables a esta tabla: agrega las nuevas
+         * y reemplaza las del mismo nombre. Solo se persiste al Aceptar.
+         */
+        private void importFile() {
+            JFileChooser chooser = fileChooser("Importar variables globales");
+            if (chooser.showOpenDialog(VariablesDialog.this)
+                    != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            File file = chooser.getSelectedFile();
+            QueryVariables imported;
+            try {
+                imported = QueryVariables.loadFile(file);
+            } catch (Exception e) {
+                warn("No se pudo importar " + file.getName() + ":\n"
+                        + e.getMessage());
+                return;
+            }
+            lastDirectory = file.getParentFile();
+            if (imported.isEmpty()) {
+                warn("El archivo no contiene variables.");
+                return;
+            }
+            stopEditing();
+            int replaced = 0;
+            for (QueryVariables.Variable v : imported.getVariables()) {
+                for (int r = model.getRowCount() - 1; r >= 0; r--) {
+                    if (v.getName().equalsIgnoreCase(text(r, COL_NAME))) {
+                        model.removeRow(r);
+                        replaced++;
+                    }
+                }
+                addRow(v.getName(), v.getType(), v.getValue(),
+                        v.getDescription());
+                refreshPreview(model.getRowCount() - 1);
+            }
+            int total = imported.getVariables().size();
+            JOptionPane.showMessageDialog(VariablesDialog.this,
+                    "Se importaron " + total + " variable(s): "
+                            + (total - replaced) + " nueva(s) y " + replaced
+                            + " reemplazada(s).\n\nRevisa la tabla y pulsa"
+                            + " Aceptar para guardarlas.", getTitle(),
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+
+        private JFileChooser fileChooser(String title) {
+            JFileChooser chooser = lastDirectory == null
+                    ? new JFileChooser() : new JFileChooser(lastDirectory);
+            chooser.setDialogTitle(title);
+            chooser.setFileFilter(new FileNameExtensionFilter(
+                    "Variables JSON (*.json)", "json"));
+            return chooser;
         }
 
         private void addRow(String name, QueryVariables.Type type,

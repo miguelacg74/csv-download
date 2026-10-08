@@ -21,7 +21,8 @@
       "Exec(./jdk/jre/bin/javap.exe)",
       "Exec(/c/app/sqldeveloper/jdk/jre/bin/javac.exe)",
       "Exec(\"C:\\app\\sqldeveloper\\jdk\\jre\\bin\\javac.exe\")",
-      "Exec(\"/c/app/sqldeveloper/jdk/jre/bin/javac.exe\")"
+      "Exec(\"/c/app/sqldeveloper/jdk/jre/bin/javac.exe\")",
+      "Exec(/c/app/sqldeveloper/jdk/jre/bin/java.exe)"
     ]
   }
 }

@@ -1,6 +1,10 @@
 package com.csv.download;
 
+import java.io.File;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
@@ -627,6 +631,67 @@ public final class QueryVariables {
     /** Una variable desde un objeto JSON plano ({@link #toJson(Variable)}). */
     public static Variable variableFromJson(String json) {
         return fromMap(JsonUtil.parseObject(json));
+    }
+
+    // ------------------------------------------------- archivo portable
+
+    /** Valor de la clave "format" del archivo de variables exportado. */
+    public static final String FILE_FORMAT = "csv-download-variables";
+    /** Version del formato del archivo de variables. */
+    public static final int FILE_VERSION = 1;
+    private static final Charset UTF8 = Charset.forName("UTF-8");
+
+    /**
+     * Archivo portable para llevar las variables a otro equipo:
+     * {"format":..., "version":1, "variables":[...]} con una variable por
+     * linea para que sea legible y versionable.
+     */
+    public String toFileJson() {
+        StringBuilder json = new StringBuilder("{\r\n  \"format\": ")
+                .append(JsonUtil.quote(FILE_FORMAT))
+                .append(",\r\n  \"version\": ").append(FILE_VERSION)
+                .append(",\r\n  \"variables\": [");
+        for (int i = 0; i < variables.size(); i++) {
+            json.append(i == 0 ? "\r\n    " : ",\r\n    ")
+                    .append(toJson(variables.get(i)));
+        }
+        return json.append(variables.isEmpty() ? "]\r\n}\r\n"
+                : "\r\n  ]\r\n}\r\n").toString();
+    }
+
+    /**
+     * Lee un archivo de variables ({@link #toFileJson()}). Tambien admite
+     * un preset JSON (toma sus "variables") o un array suelto; tolera el
+     * BOM que anaden algunos editores de Windows.
+     *
+     * @throws IllegalArgumentException si no es JSON valido o no contiene
+     *         variables
+     */
+    public static QueryVariables fromFileJson(String json) {
+        String text = json == null ? "" : json.trim();
+        if (text.startsWith("\uFEFF")) {
+            text = text.substring(1).trim();
+        }
+        if (text.startsWith("[")) {
+            return fromJson(text);
+        }
+        Map<String, String> values = JsonUtil.parseObjectRaw(text);
+        if (!values.containsKey("variables")) {
+            throw new IllegalArgumentException("el archivo no contiene"
+                    + " variables (falta la clave \"variables\").");
+        }
+        return fromJson(values.get("variables"));
+    }
+
+    /** Guarda las variables en un archivo portable (UTF-8). */
+    public void saveFile(File file) throws IOException {
+        Files.write(file.toPath(), toFileJson().getBytes(UTF8));
+    }
+
+    /** Carga un archivo de variables; ver {@link #fromFileJson(String)}. */
+    public static QueryVariables loadFile(File file) throws IOException {
+        return fromFileJson(new String(Files.readAllBytes(file.toPath()),
+                UTF8));
     }
 
     private static Variable fromMap(Map<String, String> item) {

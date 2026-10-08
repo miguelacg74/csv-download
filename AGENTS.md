@@ -127,6 +127,15 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   se cierra (es modal). El controller lo implementa con
   `OpenWorksheetWizard.openNewTempWorksheet(connName, texto)` usando el
   nombre de conexion del nodo del navegador o de la hoja activa.
+- Variables globales portables: las globales viven en `java.util.prefs`
+  (registro de Windows, no se copian con el plugin). La pestana Globales de
+  `VariablesDialog` tiene "Exportar..."/"Importar...":
+  `QueryVariables.saveFile`/`loadFile` (`toFileJson`/`fromFileJson`, UTF-8,
+  `{"format":"csv-download-variables","version":1,"variables":[...]}`).
+  `fromFileJson` tolera BOM y acepta tambien un preset o un array suelto.
+  Importar fusiona en la tabla (gana el archivo) y solo persiste al Aceptar.
+- Tooltips: todo campo, checkbox y boton lleva `setToolTipText` (los campos
+  en `CsvExportDialog.installFieldTips`); mantenerlo al anadir controles.
 - Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
   carpeta (`listPresets` ordena por nombre, no recursivo) sobre la misma
   conexion; cada preset usa SU carpeta de salida (se crea si falta) y el que
