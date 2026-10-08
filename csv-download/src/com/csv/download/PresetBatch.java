@@ -137,12 +137,27 @@ public final class PresetBatch {
                                          List<File> presetFiles,
                                          boolean skipExisting,
                                          Progress progress) {
+        return run(connection, presetFiles, skipExisting, null, progress);
+    }
+
+    /**
+     * Igual que {@link #run(Connection, List, boolean, Progress)} con
+     * variables de consulta globales: cada preset las combina con las
+     * suyas propias, que ganan en caso de mismo nombre
+     * ({@link QueryVariables#overriddenBy}). Null = solo las del preset.
+     */
+    public static List<PresetResult> run(Connection connection,
+                                         List<File> presetFiles,
+                                         boolean skipExisting,
+                                         QueryVariables globals,
+                                         Progress progress) {
         List<PresetResult> results = new ArrayList<PresetResult>();
         boolean[] cancelled = {false};
         int total = presetFiles.size();
+        QueryVariables base = globals == null ? QueryVariables.EMPTY : globals;
         for (int i = 0; i < total; i++) {
             PresetResult result = runOne(connection, presetFiles.get(i),
-                    i + 1, total, skipExisting, progress, cancelled);
+                    i + 1, total, skipExisting, base, progress, cancelled);
             if (result != null) {
                 results.add(result);
             }
@@ -156,6 +171,7 @@ public final class PresetBatch {
     private static PresetResult runOne(Connection connection, File file,
                                        int presetIndex, int presetTotal,
                                        boolean batchSkip,
+                                       QueryVariables globals,
                                        Progress progress,
                                        boolean[] cancelled) {
         List<CsvExporter.TableResult> none =
@@ -241,17 +257,18 @@ public final class PresetBatch {
         }
 
         boolean skipExisting = batchSkip || preset.isSkipExisting();
+        QueryVariables variables = globals.overriddenBy(preset.getVariables());
         if (preset.isUseCustomQuery()) {
             return new PresetResult(file.getName(), dir, null,
                     CsvExporter.exportQuery(connection, preset.getCustomQuery(),
                             preset.getMaxRows(), preset.getRowsPerFile(), dir,
                             preset.getCustomFileName(), skipExisting,
-                            preset.isResume(), inner));
+                            preset.isResume(), variables, inner));
         }
         return new PresetResult(file.getName(), dir, null,
                 CsvExporter.export(connection, tables, preset.getWhere(),
                         preset.getOrderBy(), preset.getMaxRows(),
                         preset.getRowsPerFile(), dir, skipExisting,
-                        preset.isResume(), inner));
+                        preset.isResume(), variables, inner));
     }
 }

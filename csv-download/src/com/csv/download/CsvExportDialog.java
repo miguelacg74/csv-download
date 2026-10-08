@@ -54,6 +54,10 @@ import javax.swing.text.JTextComponent;
  * SELECT que se ejecutarian para cada tabla) a una hoja de trabajo nueva
  * via {@link ScriptOpener}; el boton solo aparece si se recibe uno.
  *
+ * "Variables..." abre {@link VariablesDialog}: variables {@code :NOMBRE}
+ * globales (preferencias del usuario) y del preset (sobrescriben a las
+ * globales) para el WHERE, el ORDER BY o la consulta personalizada.
+ *
  * Es Swing puro: recibe el padre por parametro y no usa APIs del IDE.
  */
 public class CsvExportDialog extends JDialog {
@@ -84,13 +88,14 @@ public class CsvExportDialog extends JDialog {
         private final String customQuery;
         private final String customFileName;
         private final List<File> presetFiles;
+        private final QueryVariables variables;
 
         private Request(List<String> tables, File directory, String where,
                         String orderBy, int maxRows, int rowsPerFile,
                         boolean skipExisting, boolean resume,
                         boolean useCustomQuery,
                         String customQuery, String customFileName,
-                        List<File> presetFiles) {
+                        List<File> presetFiles, QueryVariables variables) {
             this.tables = tables;
             this.directory = directory;
             this.where = where;
@@ -103,6 +108,8 @@ public class CsvExportDialog extends JDialog {
             this.customQuery = customQuery;
             this.customFileName = customFileName;
             this.presetFiles = presetFiles;
+            this.variables = variables == null
+                    ? QueryVariables.EMPTY : variables;
         }
 
         /**
@@ -111,11 +118,23 @@ public class CsvExportDialog extends JDialog {
          * propia configuracion. Solo se conserva {@code skipExisting}: si
          * el checkbox del dialogo esta marcado, fuerza la omision de los
          * CSV existentes en TODO el lote (ademas del flag de cada preset).
+         * {@code globals} son las variables globales: cada preset las
+         * combina con las suyas.
          */
         public static Request forPresetBatch(List<File> presetFiles,
-                                             boolean skipExisting) {
+                                             boolean skipExisting,
+                                             QueryVariables globals) {
             return new Request(null, null, "", "", 0, 0, skipExisting, false,
-                    false, "", "", presetFiles);
+                    false, "", "", presetFiles, globals);
+        }
+
+        /**
+         * Variables de consulta: en el modo normal las efectivas (globales
+         * sobrescritas por las del preset); en un lote solo las globales.
+         * Nunca null.
+         */
+        public QueryVariables getVariables() {
+            return variables;
         }
 
         /** Nombres de tabla tal cual los escribio el usuario. */
@@ -220,11 +239,23 @@ public class CsvExportDialog extends JDialog {
     private final PresetHistory history = createHistory();
     /** Destino de "Abrir en hoja SQL"; null oculta el boton. */
     private final ScriptOpener scriptOpener;
+    /** Variables globales (persistidas en preferencias si hay historial). */
+    private QueryVariables globalVariables = QueryVariables.EMPTY;
+    /** Variables del preset actual: sobrescriben a las globales. */
+    private QueryVariables presetVariables = QueryVariables.EMPTY;
+    private final JButton variablesButton = new JButton();
 
     private CsvExportDialog(Frame owner, String connectionName,
                             ScriptOpener scriptOpener) {
         super(owner, "Descargar tablas a CSV", true);
         this.scriptOpener = scriptOpener;
+        if (history != null) {
+            try {
+                globalVariables = history.globalVariables();
+            } catch (Throwable ignored) {
+                // sin preferencias legibles se empieza sin globales
+            }
+        }
         build(connectionName);
         pack();
         setMinimumSize(new Dimension(520, getHeight()));
@@ -378,6 +409,15 @@ public class CsvExportDialog extends JDialog {
             });
             presets.add(recent);
         }
+        variablesButton.setToolTipText("Variables :NOMBRE (texto, numero,"
+                + " fecha) para usar en el WHERE, ORDER BY o la consulta");
+        variablesButton.addActionListener(new ActionListener() {
+            public void actionPerformed(ActionEvent e) {
+                editVariables();
+            }
+        });
+        updateVariablesButton();
+        presets.add(variablesButton);
         JButton batch = new JButton("Ejecutar presets de carpeta...");
         batch.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
@@ -439,7 +479,13 @@ public class CsvExportDialog extends JDialog {
      * visible).
      */
     private void openInWorksheet() {
-        String script = worksheetScript();
+        String script;
+        try {
+            script = worksheetScript();
+        } catch (java.sql.SQLException e) {
+            warn(e.getMessage());
+            return;
+        }
         if (script.isEmpty()) {
             warn(customCheck.isSelected()
                     ? "Escribe la consulta personalizada."
@@ -455,18 +501,70 @@ public class CsvExportDialog extends JDialog {
         dispose();
     }
 
-    /** Script para la hoja SQL segun el modo; vacio si no hay nada. */
-    private String worksheetScript() {
+    /**
+     * Script para la hoja SQL segun el modo; vacio si no hay nada. Las
+     * variables definidas se sustituyen por literales para poder
+     * ejecutarlo tal cual ({@link QueryVariables#inline(String)}).
+     */
+    private String worksheetScript() throws java.sql.SQLException {
+        QueryVariables vars = effectiveVariables();
         if (customCheck.isSelected()) {
-            return queryArea.getText().trim();
+            return vars.inline(queryArea.getText().trim());
         }
         StringBuilder sb = new StringBuilder();
         for (String token : CsvExporter.parseTableList(tablesArea.getText())) {
-            sb.append(CsvExporter.selectFor(CsvExporter.qualifiedName(token),
-                    whereField.getText(), orderByField.getText()))
+            sb.append(vars.inline(CsvExporter.selectFor(
+                    CsvExporter.qualifiedName(token),
+                    whereField.getText(), orderByField.getText())))
                     .append(";\n");
         }
         return sb.toString();
+    }
+
+    // ------------------------------------------------------------ variables
+
+    /** Globales sobrescritas por las del preset: las que se aplican. */
+    private QueryVariables effectiveVariables() {
+        return globalVariables.overriddenBy(presetVariables);
+    }
+
+    /**
+     * Abre el editor de variables; al aceptar persiste las globales en
+     * las preferencias (si hay almacen) y deja las del preset para el
+     * proximo "Guardar preset...".
+     */
+    private void editVariables() {
+        VariablesDialog.Result edited = VariablesDialog.edit(this,
+                globalVariables, presetVariables, history != null);
+        if (edited == null) {
+            return;
+        }
+        globalVariables = edited.getGlobals();
+        presetVariables = edited.getPreset();
+        updateVariablesButton();
+        if (history != null && !history.setGlobalVariables(globalVariables)) {
+            warn("No se pudieron guardar las variables globales en las\n"
+                    + "preferencias: solo duraran esta sesion.");
+        }
+    }
+
+    private void updateVariablesButton() {
+        int count = effectiveVariables().getVariables().size();
+        variablesButton.setText(count == 0 ? "Variables..."
+                : "Variables (" + count + ")...");
+    }
+
+    /**
+     * Comprueba que las variables que usa el SQL esten definidas y tengan
+     * un valor valido; null si todo va bien o el mensaje del problema.
+     */
+    private String checkVariables(String sql) {
+        try {
+            effectiveVariables().at(java.time.LocalDateTime.now()).bind(sql);
+            return null;
+        } catch (java.sql.SQLException e) {
+            return e.getMessage();
+        }
     }
 
     private void chooseDirectory() {
@@ -677,7 +775,8 @@ public class CsvExportDialog extends JDialog {
                 != JOptionPane.YES_OPTION) {
             return;
         }
-        request = Request.forPresetBatch(files, skipCheck.isSelected());
+        request = Request.forPresetBatch(files, skipCheck.isSelected(),
+                globalVariables);
         dispose();
     }
 
@@ -695,6 +794,7 @@ public class CsvExportDialog extends JDialog {
         preset.setUseCustomQuery(customCheck.isSelected());
         preset.setCustomQuery(queryArea.getText());
         preset.setCustomFileName(customFileField.getText().trim());
+        preset.setVariables(presetVariables);
         return preset;
     }
 
@@ -712,6 +812,8 @@ public class CsvExportDialog extends JDialog {
         queryArea.setText(preset.getCustomQuery());
         customFileField.setText(preset.getCustomFileName().isEmpty()
                 ? DEFAULT_QUERY_FILE : preset.getCustomFileName());
+        presetVariables = preset.getVariables();
+        updateVariablesButton();
         toggleCustomMode();
     }
 
@@ -769,11 +871,19 @@ public class CsvExportDialog extends JDialog {
                     + "'Filas por archivo' mayor que 0.");
             return;
         }
+        String where = whereField.getText().trim();
+        String orderBy = orderByField.getText().trim();
+        String variablesProblem = checkVariables(custom ? customQuery
+                : CsvExporter.selectFor("T", where, orderBy));
+        if (variablesProblem != null) {
+            warn(variablesProblem);
+            return;
+        }
 
-        request = new Request(tables, dir, whereField.getText().trim(),
-                orderByField.getText().trim(), maxRows, rowsPerFile,
-                skipCheck.isSelected(), resumeCheck.isSelected(), custom,
-                customQuery, customFileName, null);
+        request = new Request(tables, dir, where, orderBy, maxRows,
+                rowsPerFile, skipCheck.isSelected(), resumeCheck.isSelected(),
+                custom, customQuery, customFileName, null,
+                effectiveVariables());
         dispose();
     }
 

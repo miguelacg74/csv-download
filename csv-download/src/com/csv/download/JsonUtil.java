@@ -1,12 +1,15 @@
 package com.csv.download;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
  * Serializador/parser JSON minimo hecho a mano (no hay libreria JSON en el
  * proyecto). Soporta lo que necesitan los presets: un objeto plano con
- * valores de tipo string, numero o booleano.
+ * valores de tipo string, numero o booleano, y arrays de objetos planos
+ * (las variables de consulta, ver {@link QueryVariables}).
  *
  * El parser es tolerante con claves desconocidas (las ignora quien lee el
  * mapa) y lanza {@link IllegalArgumentException} con un mensaje claro si el
@@ -15,6 +18,36 @@ import java.util.Map;
 public final class JsonUtil {
 
     private JsonUtil() {
+    }
+
+    /**
+     * Fragmento JSON ya serializado (p.ej. un array): {@link #objectToJson}
+     * lo escribe tal cual en vez de entrecomillarlo.
+     */
+    public static final class Raw {
+
+        private final String json;
+
+        public Raw(String json) {
+            this.json = json;
+        }
+
+        @Override
+        public String toString() {
+            return json;
+        }
+    }
+
+    /** Serializa un array de objetos planos [{...},{...}] en una sola linea. */
+    public static String arrayToJson(List<? extends Map<String, ?>> items) {
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append(objectToJson(items.get(i)));
+        }
+        return json.append(']').toString();
     }
 
     /** Serializa un objeto plano {"clave":valor,...} en una sola linea. */
@@ -36,7 +69,8 @@ public final class JsonUtil {
         if (value == null) {
             return "null";
         }
-        if (value instanceof Number || value instanceof Boolean) {
+        if (value instanceof Number || value instanceof Boolean
+                || value instanceof Raw) {
             return value.toString();
         }
         return quote(value.toString());
@@ -71,25 +105,88 @@ public final class JsonUtil {
      * saltan (se ignoran con tolerancia).
      */
     public static Map<String, String> parseObject(String json) {
-        return new Parser(json).object();
+        return new Parser(json, false).object();
+    }
+
+    /**
+     * Como {@link #parseObject(String)}, pero los arrays y objetos
+     * anidados llegan como su texto JSON sin interpretar (para pasarlos a
+     * {@link #parseArray(String)}).
+     */
+    public static Map<String, String> parseObjectRaw(String json) {
+        return new Parser(json, true).object();
+    }
+
+    /**
+     * Parsea un array de objetos planos [{...},...]; cada objeto llega como
+     * en {@link #parseObject(String)}. Null o texto vacio = lista vacia.
+     */
+    public static List<Map<String, String>> parseArray(String json) {
+        if (json == null || json.trim().isEmpty()) {
+            return new ArrayList<Map<String, String>>();
+        }
+        return new Parser(json, false).array();
     }
 
     private static final class Parser {
 
         private final String text;
+        private final boolean keepCompound;
         private int pos;
 
-        Parser(String text) {
+        Parser(String text, boolean keepCompound) {
             this.text = text == null ? "" : text;
+            this.keepCompound = keepCompound;
+        }
+
+        List<Map<String, String>> array() {
+            List<Map<String, String>> items =
+                    new ArrayList<Map<String, String>>();
+            skipWhitespace();
+            expect('[');
+            skipWhitespace();
+            if (peek() == ']') {
+                pos++;
+            } else {
+                while (true) {
+                    skipWhitespace();
+                    items.add(objectBody());
+                    skipWhitespace();
+                    char c = peek();
+                    pos++;
+                    if (c == ']') {
+                        break;
+                    }
+                    if (c != ',') {
+                        pos--;
+                        fail("se esperaba ',' o ']'");
+                    }
+                }
+            }
+            skipWhitespace();
+            if (pos != text.length()) {
+                fail("sobra texto tras el array");
+            }
+            return items;
         }
 
         Map<String, String> object() {
+            Map<String, String> map = objectBody();
+            skipWhitespace();
+            if (pos != text.length()) {
+                fail("sobra texto tras el objeto");
+            }
+            return map;
+        }
+
+        private Map<String, String> objectBody() {
             Map<String, String> map = new LinkedHashMap<String, String>();
             skipWhitespace();
             expect('{');
             skipWhitespace();
             if (peek() == '}') {
                 pos++;
+                return map;
             }
             while (pos < text.length()) {
                 skipWhitespace();
@@ -110,10 +207,6 @@ public final class JsonUtil {
                 }
                 fail("se esperaba ',' o '}'");
             }
-            skipWhitespace();
-            if (pos != text.length()) {
-                fail("sobra texto tras el objeto");
-            }
             return map;
         }
 
@@ -123,8 +216,9 @@ public final class JsonUtil {
                 return string();
             }
             if (c == '{' || c == '[') {
+                int start = pos;
                 skipCompound(c);
-                return null;
+                return keepCompound ? text.substring(start, pos) : null;
             }
             return literal();
         }

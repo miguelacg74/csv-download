@@ -2,6 +2,7 @@ import com.csv.download.CsvExporter;
 import com.csv.download.ExportPreset;
 import com.csv.download.PresetBatch;
 import com.csv.download.PresetHistory;
+import com.csv.download.QueryVariables;
 
 import java.io.File;
 import java.lang.reflect.InvocationHandler;
@@ -18,6 +19,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -29,6 +31,9 @@ import java.util.prefs.Preferences;
  * Simula una tabla con una conexion JDBC falsa (java.lang.reflect.Proxy).
  */
 public final class SelfTest {
+
+    /** Valores enlazados en el ultimo PreparedStatement de datos. */
+    private static final List<Object> BOUND = new ArrayList<Object>();
 
     public static void main(String[] args) throws Exception {
         // ---- troceado del listado de tablas
@@ -423,6 +428,29 @@ public final class SelfTest {
                 "consulta del preset mal leida: " + back.getCustomQuery());
         check("puntual".equals(back.getCustomFileName()),
                 "nombre de archivo del preset mal leido");
+        check(back.getVariables().isEmpty(),
+                "un preset sin variables deberia leerse sin variables");
+
+        // variables propias del preset (array JSON anidado)
+        src.setVariables(new QueryVariables(Arrays.asList(
+                new QueryVariables.Variable("desde",
+                        QueryVariables.Type.DATE, "INICIO_MES-1M",
+                        "mes \"anterior\""),
+                new QueryVariables.Variable("ESTADO",
+                        QueryVariables.Type.TEXT, " A ", ""))));
+        back = ExportPreset.fromJson(src.toJson());
+        check(back.getVariables().getVariables().size() == 2,
+                "las variables del preset no se conservaron: " + src.toJson());
+        QueryVariables.Variable vd = back.getVariables().get("DESDE");
+        check(vd != null && vd.getType() == QueryVariables.Type.DATE
+                && "INICIO_MES-1M".equals(vd.getValue())
+                && "mes \"anterior\"".equals(vd.getDescription()),
+                "variable DESDE del preset mal leida");
+        check(" A ".equals(back.getVariables().get("estado").getValue()),
+                "el valor de texto deberia conservar sus espacios");
+        check("T".equals(ExportPreset.fromJson("{\"tables\":\"T\","
+                + "\"variables\":[]}").getTables()),
+                "un array de variables vacio deberia admitirse");
 
         // preset guardado y leido de disco
         File presetFile = File.createTempFile("preset", ".json");
@@ -496,6 +524,31 @@ public final class SelfTest {
                     "la ultima carpeta de lote no se recordo");
             check("C:\\salida".equals(reloaded.lastOutputDirectory()),
                     "la ultima carpeta de salida no se recordo");
+
+            // variables globales: persisten y reemplazan a las anteriores
+            check(reloaded.globalVariables().isEmpty(),
+                    "sin guardar no deberia haber variables globales");
+            check(history.setGlobalVariables(new QueryVariables(Arrays.asList(
+                    new QueryVariables.Variable("A", QueryVariables.Type.NUMBER,
+                            "1.5", "uno"),
+                    new QueryVariables.Variable("B", QueryVariables.Type.TEXT,
+                            "x", "")))), "no se guardaron las globales");
+            QueryVariables globalsBack =
+                    new PresetHistory(testNode).globalVariables();
+            check(globalsBack.getVariables().size() == 2
+                    && "1.5".equals(globalsBack.get("A").getValue())
+                    && globalsBack.get("A").getType()
+                            == QueryVariables.Type.NUMBER,
+                    "variables globales mal recuperadas");
+            history.setGlobalVariables(new QueryVariables(Arrays.asList(
+                    new QueryVariables.Variable("C", QueryVariables.Type.DATE,
+                            "HOY", ""))));
+            globalsBack = new PresetHistory(testNode).globalVariables();
+            check(globalsBack.getVariables().size() == 1
+                    && globalsBack.get("A") == null,
+                    "al regrabar las globales deberian quitarse las viejas");
+            check(history.entries().size() == PresetHistory.MAX_ENTRIES - 1,
+                    "las variables no deberian tocar el historial");
         } finally {
             testNode.removeNode();
         }
@@ -617,9 +670,219 @@ public final class SelfTest {
         check(batch.isEmpty(),
                 "al cancelar al inicio no deberia ejecutarse ningun preset");
 
+        variablesTests(fake, executedSql, dir, batchDir);
+
         System.out.println("OK: todas las comprobaciones pasaron");
         deleteTree(dir);
         deleteTree(batchDir);
+    }
+
+    /** Variables de consulta: valores, parser, enlace, export y lote. */
+    private static void variablesTests(Connection fake, String[] executedSql,
+                                       File dir, File batchDir)
+            throws Exception {
+        // ---- valores relativos (miercoles 2026-10-07 10:30:15)
+        LocalDateTime now = LocalDateTime.of(2026, 10, 7, 10, 30, 15);
+        String[][] dates = {
+                {"HOY", "2026-10-07"}, {"AYER", "2026-10-06"},
+                {"MANANA", "2026-10-08"}, {"hoy + 2", "2026-10-09"},
+                {"AHORA", "2026-10-07"},
+                {"INICIO_MES", "2026-10-01"}, {"INICIO_MES-1M", "2026-09-01"},
+                {"FIN_MES-1M", "2026-09-30"}, {"INICIO_MES-1D", "2026-09-30"},
+                {"INICIO_SEMANA", "2026-10-05"}, {"FIN_SEMANA", "2026-10-11"},
+                {"INICIO_SEMANA-1S", "2026-09-28"},
+                {"INICIO_TRIMESTRE", "2026-10-01"},
+                {"FIN_TRIMESTRE", "2026-12-31"},
+                {"INICIO_TRIMESTRE-3M", "2026-07-01"},
+                {"INICIO_ANIO", "2026-01-01"}, {"FIN_ANIO-1A", "2025-12-31"},
+                {"2026-01-31", "2026-01-31"}};
+        for (String[] d : dates) {
+            Object v = QueryVariables.resolve(QueryVariables.Type.DATE, d[0],
+                    now);
+            check(d[1].equals(v), d[0] + " deberia ser " + d[1] + ", fue " + v);
+        }
+        check("2026-10-07 10:30:15".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATETIME, "AHORA", now)),
+                "AHORA en fecha-hora deberia conservar la hora");
+        check("2026-09-30 23:59:59".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATETIME, "FIN_MES-1M", now)),
+                "FIN_* en fecha-hora deberia ser 23:59:59");
+        check("2026-10-01 00:00:00".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATETIME, "INICIO_MES", now)),
+                "INICIO_* en fecha-hora deberia ser 00:00:00");
+        check("2026-01-31 13:45:00".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATETIME, "2026-01-31 13:45", now)),
+                "fecha-hora sin segundos mal leida");
+        check("2026-01-31 00:00:00".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATETIME, "2026-01-31", now)),
+                "fecha-hora solo con fecha deberia ser medianoche");
+        check("2026-02-28".equals(QueryVariables.resolve(
+                QueryVariables.Type.DATE, "FIN_MES-1M",
+                LocalDateTime.of(2026, 3, 31, 0, 0))),
+                "FIN_MES-1M a 31 de marzo deberia ser 28 de febrero");
+        check(new BigDecimal("12.50").equals(QueryVariables.resolve(
+                QueryVariables.Type.NUMBER, " 12.50 ", now)),
+                "numero mal leido");
+        check(QueryVariables.resolve(QueryVariables.Type.NUMBER, "", now) == null
+                && QueryVariables.resolve(QueryVariables.Type.DATE, " ", now)
+                        == null
+                && QueryVariables.resolve(QueryVariables.Type.TEXT, "", now)
+                        == null,
+                "valor vacio deberia ser NULL");
+        for (String[] bad : new String[][]{{"NUMBER", "1,5"},
+                {"DATE", "31/01/2026"}, {"DATE", "PASADO"},
+                {"DATE", "HOY+1X"}, {"DATETIME", "2026-01-31 25:00"}}) {
+            try {
+                QueryVariables.resolve(QueryVariables.Type.parse(bad[0]),
+                        bad[1], now);
+                check(false, bad[1] + " deberia ser invalido como " + bad[0]);
+            } catch (IllegalArgumentException expected) {
+                check(expected.getMessage().contains(bad[1].trim()),
+                        "el error deberia citar el valor: "
+                                + expected.getMessage());
+            }
+        }
+        check(QueryVariables.isValidName("Desde_1")
+                && !QueryVariables.isValidName("1A")
+                && !QueryVariables.isValidName("A-B")
+                && !QueryVariables.isValidName(""),
+                "validacion de nombres de variable");
+
+        // ---- parser: ignora literales, comillas dobles y comentarios
+        String sql = "SELECT * FROM T WHERE F >= :desde"
+                + " AND TO_CHAR(F,'HH24:MI') <> ':NO' AND \"a:b\" = 1"
+                + " -- :COMENT\n AND X = :Estado /* :otro */"
+                + " AND q'[ :q ]' = :DESDE AND Y = 'it''s :x'";
+        check(QueryVariables.referencedNames(sql)
+                        .equals(Arrays.asList("DESDE", "ESTADO")),
+                "variables detectadas: " + QueryVariables.referencedNames(sql));
+        QueryVariables vars = new QueryVariables(Arrays.asList(
+                new QueryVariables.Variable("DESDE", QueryVariables.Type.DATE,
+                        "INICIO_MES-1M", ""),
+                new QueryVariables.Variable("estado", QueryVariables.Type.TEXT,
+                        "O'Brien", ""),
+                new QueryVariables.Variable("NUM", QueryVariables.Type.NUMBER,
+                        "", ""))).at(now);
+        QueryVariables.Bound bound = vars.bind(sql);
+        check(bound.getValues().equals(
+                Arrays.asList("2026-09-01", "O'Brien", "2026-09-01")),
+                "valores enlazados: " + bound.getValues());
+        check(bound.getSql().contains("F >= TO_DATE(?, 'YYYY-MM-DD')")
+                        && bound.getSql().contains("X = ?")
+                        && bound.getSql().contains("':NO'")
+                        && bound.getSql().contains("-- :COMENT")
+                        && bound.getSql().contains("/* :otro */")
+                        && bound.getSql().contains("q'[ :q ]' = TO_DATE(")
+                        && bound.getSql().contains("'it''s :x'"),
+                "SQL enlazado inesperado: " + bound.getSql());
+        QueryVariables.Bound plain = vars.bind("SELECT 1 FROM dual");
+        check(!plain.hasParameters()
+                && "SELECT 1 FROM dual".equals(plain.getSql()),
+                "un SQL sin variables deberia quedar intacto");
+        try {
+            vars.bind("SELECT * FROM T WHERE A = :NOPE");
+            check(false, "una variable no definida deberia fallar");
+        } catch (SQLException e) {
+            check(e.getMessage().contains("NOPE"),
+                    "el error deberia nombrar la variable: " + e.getMessage());
+        }
+        check(("A = 'O''Brien' AND F = TO_DATE('2026-09-01', 'YYYY-MM-DD')"
+                + " AND N = NULL AND Z = :NADA").equals(vars.inline(
+                        "A = :ESTADO AND F = :DESDE AND N = :NUM AND Z = :NADA")),
+                "inline: " + vars.inline(
+                        "A = :ESTADO AND F = :DESDE AND N = :NUM AND Z = :NADA"));
+
+        // ---- combinacion globales + preset (el preset gana)
+        QueryVariables globals = new QueryVariables(Arrays.asList(
+                new QueryVariables.Variable("DESDE", QueryVariables.Type.DATE,
+                        "HOY", ""),
+                new QueryVariables.Variable("MINIMO",
+                        QueryVariables.Type.NUMBER, "1", "")));
+        QueryVariables merged = globals.overriddenBy(new QueryVariables(
+                Arrays.asList(new QueryVariables.Variable("desde",
+                        QueryVariables.Type.DATE, "AYER", ""))));
+        check(merged.getVariables().size() == 2
+                && "AYER".equals(merged.get("DESDE").getValue())
+                && "DESDE".equals(merged.getVariables().get(0).getName()),
+                "el preset deberia sobrescribir a la global del mismo nombre");
+
+        // ---- export con variables: PreparedStatement con valores tipados
+        QueryVariables exportVars = new QueryVariables(Arrays.asList(
+                new QueryVariables.Variable("DESDE", QueryVariables.Type.DATE,
+                        "2024-01-01", ""),
+                new QueryVariables.Variable("ESTADO", QueryVariables.Type.TEXT,
+                        "ana", ""),
+                new QueryVariables.Variable("NUM", QueryVariables.Type.NUMBER,
+                        "1.5", "")));
+        List<CsvExporter.TableResult> results = CsvExporter.export(fake,
+                Arrays.asList("EMP"), "FEC >= :DESDE AND NOMBRE = :estado",
+                "", 0, 0, dir, false, false, exportVars, null);
+        check(results.get(0).isOk() && results.get(0).getRows() == 3,
+                "export con variables fallo: " + results.get(0).getError());
+        check(("SELECT * FROM EMP WHERE FEC >= TO_DATE(?, 'YYYY-MM-DD')"
+                + " AND NOMBRE = ?").equals(executedSql[0]),
+                "SQL con variables inesperado: " + executedSql[0]);
+        check(BOUND.equals(Arrays.asList("2024-01-01", "ana")),
+                "valores enlazados en el export: " + BOUND);
+        check(readFile(new File(dir, "EMP.csv")).split("\r\n").length == 4,
+                "el CSV con variables deberia tener cabecera + 3 filas");
+
+        results = CsvExporter.export(fake, Arrays.asList("EMP", "DEPT"),
+                "ID = :NOPE", "", 0, 0, dir, false, false, exportVars, null);
+        check(results.size() == 2 && results.get(0).getError() != null
+                && results.get(0).getError().contains("NOPE")
+                && results.get(1).getError() != null,
+                "una variable no definida deberia fallar cada tabla y seguir");
+
+        results = CsvExporter.exportQuery(fake,
+                "SELECT * FROM t WHERE id > :NUM;", 0, 0, dir, "q_vars",
+                false, false, exportVars, null);
+        check(results.get(0).isOk()
+                && BOUND.equals(Arrays.asList(new BigDecimal("1.5"))),
+                "consulta personalizada con variable numerica: " + BOUND);
+        results = CsvExporter.exportQuery(fake,
+                "SELECT * FROM t WHERE id > :N2", 0, 0, dir, "q_null",
+                false, false, new QueryVariables(Arrays.asList(
+                        new QueryVariables.Variable("N2",
+                                QueryVariables.Type.NUMBER, "", ""))), null);
+        check(results.get(0).isOk() && BOUND.size() == 1
+                && BOUND.get(0) == null,
+                "un valor vacio deberia enlazarse como NULL: " + BOUND);
+
+        // ---- lote: globales + variables propias del preset
+        File varsDir = new File(batchDir, "vars");
+        varsDir.mkdirs();
+        File varsOut = new File(batchDir, "vars_out");
+        ExportPreset own = new ExportPreset();
+        own.setTables("EMP");
+        own.setWhere("ID > :MINIMO");
+        own.setDirectory(varsOut.getAbsolutePath());
+        own.setVariables(new QueryVariables(Arrays.asList(
+                new QueryVariables.Variable("MINIMO",
+                        QueryVariables.Type.NUMBER, "5", ""))));
+        File ownFile = new File(varsDir, "propia.json");
+        own.save(ownFile);
+        ExportPreset global = new ExportPreset();
+        global.setTables("DEPT");
+        global.setWhere("ID > :MINIMO");
+        global.setDirectory(varsOut.getAbsolutePath());
+        File globalFile = new File(varsDir, "global.json");
+        global.save(globalFile);
+
+        List<PresetBatch.PresetResult> batch = PresetBatch.run(fake,
+                Arrays.asList(ownFile), false, globals, null);
+        check(batch.get(0).getTables().get(0).isOk()
+                && BOUND.equals(Arrays.asList(new BigDecimal("5"))),
+                "la variable del preset deberia ganar a la global: " + BOUND);
+        batch = PresetBatch.run(fake, Arrays.asList(globalFile), false,
+                globals, null);
+        check(batch.get(0).getTables().get(0).isOk()
+                && BOUND.equals(Arrays.asList(new BigDecimal("1"))),
+                "sin variable propia deberia usarse la global: " + BOUND);
+        batch = PresetBatch.run(fake, Arrays.asList(globalFile), false, null);
+        check(batch.get(0).isOk() && batch.get(0).getTables().get(0)
+                        .getError() != null,
+                "sin globales la variable queda sin definir y la tabla falla");
     }
 
     private static String readFile(File file) throws Exception {
@@ -721,7 +984,42 @@ public final class SelfTest {
                     return st;
                 }
                 if ("prepareStatement".equals(m.getName())) {
-                    return ps;
+                    final String sql = (String) a[0];
+                    if (sql.contains("NUM_ROWS")) {
+                        return ps;
+                    }
+                    // consulta con variables enlazadas: guarda el SQL y
+                    // los valores (setString/setBigDecimal/setNull) en
+                    // BOUND para comprobarlos
+                    BOUND.clear();
+                    return proxy(PreparedStatement.class,
+                            new InvocationHandler() {
+                        public Object invoke(Object p2, Method m2,
+                                             Object[] a2) throws Throwable {
+                            String name = m2.getName();
+                            if (name.startsWith("set") && a2 != null
+                                    && a2.length == 2
+                                    && a2[0] instanceof Integer) {
+                                int idx = (Integer) a2[0];
+                                while (BOUND.size() < idx) {
+                                    BOUND.add(null);
+                                }
+                                BOUND.set(idx - 1, "setNull".equals(name)
+                                        ? null : a2[1]);
+                                return null;
+                            }
+                            if ("executeQuery".equals(name)) {
+                                executedSql[0] = sql;
+                                if (sql.contains("BAD")) {
+                                    throw new SQLException(
+                                            "ORA-00942: la tabla o vista no existe");
+                                }
+                                cursor[0] = -1;
+                                return rs;
+                            }
+                            return defaultValue(m2.getReturnType());
+                        }
+                    });
                 }
                 if ("isValid".equals(m.getName())) {
                     return true;

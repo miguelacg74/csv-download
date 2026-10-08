@@ -9,7 +9,8 @@ import java.util.prefs.Preferences;
  * Historial de acceso rapido a los presets: recuerda los ultimos
  * archivos de preset cargados/guardados (el mas reciente primero) y
  * las ultimas carpetas usadas (salida de CSV y carpeta de lote), para
- * no tener que volver a buscar la ruta cada vez.
+ * no tener que volver a buscar la ruta cada vez. Tambien guarda las
+ * variables de consulta globales ({@link QueryVariables}).
  *
  * Se persiste con {@link Preferences} (JDK puro, sin ficheros propios):
  * en Windows acaba en el registro del usuario. Los fallos de
@@ -27,6 +28,8 @@ public final class PresetHistory {
     private static final String KEY_FILE = "file.";
     private static final String KEY_BATCH_DIR = "lastBatchDir";
     private static final String KEY_OUTPUT_DIR = "lastOutputDir";
+    private static final String KEY_VAR = "var.";
+    private static final String KEY_VAR_COUNT = "var.count";
 
     private final Preferences prefs;
 
@@ -117,6 +120,55 @@ public final class PresetHistory {
 
     public void setLastOutputDirectory(File dir) {
         putPath(KEY_OUTPUT_DIR, dir);
+    }
+
+    /**
+     * Variables globales del usuario (aplican a todas las exportaciones y
+     * lotes; un preset puede sobrescribirlas). Cada variable va en su
+     * propia clave para no chocar con el limite de longitud de un valor de
+     * {@link Preferences}; una entrada ilegible se ignora.
+     */
+    public synchronized QueryVariables globalVariables() {
+        List<QueryVariables.Variable> list =
+                new ArrayList<QueryVariables.Variable>();
+        int count = prefs.getInt(KEY_VAR_COUNT, 0);
+        for (int i = 0; i < count; i++) {
+            String json = prefs.get(KEY_VAR + i, null);
+            if (json == null) {
+                continue;
+            }
+            try {
+                list.add(QueryVariables.variableFromJson(json));
+            } catch (RuntimeException ignored) {
+                // entrada corrupta: se pierde solo esa variable
+            }
+        }
+        return list.isEmpty() ? QueryVariables.EMPTY
+                : new QueryVariables(list);
+    }
+
+    /**
+     * Guarda las variables globales; false si no se pudieron persistir
+     * (p.ej. un valor demasiado largo para {@link Preferences}).
+     */
+    public synchronized boolean setGlobalVariables(QueryVariables variables) {
+        List<QueryVariables.Variable> list = variables == null
+                ? new ArrayList<QueryVariables.Variable>()
+                : variables.getVariables();
+        try {
+            int old = prefs.getInt(KEY_VAR_COUNT, 0);
+            for (int i = 0; i < list.size(); i++) {
+                prefs.put(KEY_VAR + i, QueryVariables.toJson(list.get(i)));
+            }
+            for (int i = list.size(); i < old; i++) {
+                prefs.remove(KEY_VAR + i);
+            }
+            prefs.putInt(KEY_VAR_COUNT, list.size());
+            prefs.flush();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private void putPath(String key, File dir) {

@@ -2,3 +2,6 @@
 /csv-download/build/
 /csv-download/dist/
 /csv-download/out/
+
+# Configuracion local del IDE (rutas propias de la instalacion de SQL Developer)
+/.vscode/

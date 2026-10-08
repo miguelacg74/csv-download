@@ -32,6 +32,22 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
   todos los `*.json` de una carpeta (de tablas o de consulta, se mezclan
   libremente) sobre la misma conexion; cada preset vuelca a su propia
   carpeta de salida y el que falla no detiene el lote.
+- **Variables de consulta** (opcional): el boton *Variables...* define
+  variables de tipo texto, numero, fecha o fecha-hora que se usan como
+  `:NOMBRE` en el WHERE, el ORDER BY o la consulta personalizada
+  (`FECHA >= :DESDE AND ESTADO = :ESTADO`). Se envian como parametros
+  JDBC con su tipo (sin inyeccion SQL ni dependencia del NLS; las fechas
+  van en `TO_DATE(?, ...)` para no perder indices). Hay dos ambitos:
+  **globales** (se guardan en tus preferencias y aplican a todo, incluido
+  el lote de presets) y **del preset** (se guardan en el JSON y
+  sobrescriben a la global del mismo nombre). Las fechas admiten valores
+  relativos que se calculan al exportar: `HOY`, `AYER`, `MANANA`,
+  `AHORA`, `INICIO_SEMANA`/`FIN_SEMANA`, `INICIO_MES`/`FIN_MES`,
+  `INICIO_TRIMESTRE`/`FIN_TRIMESTRE`, `INICIO_ANIO`/`FIN_ANIO`, con
+  desplazamientos `+N`/`-N` en `D` (dias), `S` (semanas), `M` (meses) o
+  `A` (anios). Ej.: `INICIO_MES-1M` y `FIN_MES-1M` = mes anterior
+  completo. Valor vacio = NULL. *Abrir en hoja SQL* sustituye las
+  variables por literales.
 - La exportacion corre en segundo plano con progreso y boton de cancelar;
   una tabla que falla no detiene el lote (queda en el resumen con su error).
   Cancelar tambien interrumpe la consulta en curso (no hay que esperar a que
@@ -95,6 +111,9 @@ como separador del classpath.
 - Los `BLOB` no se exportan (celda vacia + aviso); los `RAW` van en hex.
 - No hay seleccion de columnas en el modo listado: se exporta la tabla
   completa (`SELECT *`).
+- Las variables solo sustituyen valores (no nombres de tabla/columna) y
+  una variable es un unico valor: no sirve para listas `IN (:LISTA)`.
+  Los valores relativos usan la fecha/hora del equipo, no `SYSDATE`.
 
 ## Estructura
 
@@ -107,8 +126,11 @@ src/com/csv/download/
   ExportPreset.java           estado del dialogo <-> JSON (save/load)
   JsonUtil.java               serializador/parser JSON propio (sin librerias)
   PresetBatch.java            ejecucion en lote de presets de una carpeta
-  PresetHistory.java          historial MRU de presets y ultimas carpetas
-                              (java.util.prefs)
+  PresetHistory.java          historial MRU de presets, ultimas carpetas y
+                              variables globales (java.util.prefs)
+  QueryVariables.java         variables :NOMBRE: valores (relativos),
+                              parser SQL, enlace JDBC (Java puro)
+  VariablesDialog.java        editor Swing de variables (globales/preset)
 META-INF/MANIFEST.MF       bundle OSGi
 META-INF/extension.xml     descriptor de la extension (accion + menus)
 test/SelfTest.java         prueba manual del exportador y los presets

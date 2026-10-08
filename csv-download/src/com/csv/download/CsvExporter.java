@@ -18,6 +18,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -340,6 +341,29 @@ public final class CsvExporter {
                                            File dir, boolean skipExisting,
                                            boolean resume,
                                            Progress progress) {
+        return export(connection, tables, where, orderBy, maxRows,
+                rowsPerFile, dir, skipExisting, resume, null, progress);
+    }
+
+    /**
+     * Igual que {@link #export(Connection, List, String, String, int, int,
+     * File, boolean, boolean, Progress)} con variables de consulta: cada
+     * {@code :NOMBRE} del WHERE/ORDER BY se enlaza como parametro
+     * ({@link QueryVariables#bind(String)}). Los valores relativos se
+     * resuelven una sola vez al empezar, iguales para todas las tablas.
+     * Una variable no definida o invalida da error en cada tabla que la
+     * use (el lote sigue). Null = sin variables.
+     */
+    public static List<TableResult> export(Connection connection,
+                                           List<String> tables, String where,
+                                           String orderBy,
+                                           int maxRows, int rowsPerFile,
+                                           File dir, boolean skipExisting,
+                                           boolean resume,
+                                           QueryVariables variables,
+                                           Progress progress) {
+        QueryVariables vars = variables == null ? null
+                : variables.at(LocalDateTime.now());
         List<TableResult> results = new ArrayList<TableResult>();
         String condition = where == null ? "" : where.trim();
         String order = orderBy == null ? "" : orderBy.trim();
@@ -355,7 +379,7 @@ public final class CsvExporter {
                     : estimateRows(connection, token);
             results.add(exportTable(connection, token, qualified, condition,
                     order, maxRows, rowsPerFile, dir, skipExisting, resume,
-                    index, tables.size(), estimated, progress));
+                    index, tables.size(), estimated, vars, progress));
         }
         return results;
     }
@@ -419,6 +443,23 @@ public final class CsvExporter {
                                                 boolean skipExisting,
                                                 boolean resume,
                                                 Progress progress) {
+        return exportQuery(connection, sql, maxRows, rowsPerFile, dir,
+                fileName, skipExisting, resume, null, progress);
+    }
+
+    /**
+     * Igual que {@link #exportQuery(Connection, String, int, int, File,
+     * String, boolean, boolean, Progress)} con variables de consulta
+     * ({@code :NOMBRE} en el SELECT); null = sin variables.
+     */
+    public static List<TableResult> exportQuery(Connection connection,
+                                                String sql, int maxRows,
+                                                int rowsPerFile, File dir,
+                                                String fileName,
+                                                boolean skipExisting,
+                                                boolean resume,
+                                                QueryVariables variables,
+                                                Progress progress) {
         List<TableResult> results = new ArrayList<TableResult>();
         String checked;
         try {
@@ -432,7 +473,9 @@ public final class CsvExporter {
                 ? "consulta" : fileName;
         File out = new File(dir, fileNameFor(name));
         results.add(runSelect(connection, checked, maxRows, rowsPerFile, out,
-                out.getName(), 1, 1, skipExisting, resume, -1, progress));
+                out.getName(), 1, 1, skipExisting, resume, -1,
+                variables == null ? null : variables.at(LocalDateTime.now()),
+                progress));
         return results;
     }
 
@@ -486,12 +529,13 @@ public final class CsvExporter {
                                            File dir, boolean skipExisting,
                                            boolean resume, int index,
                                            int total, long estimatedRows,
+                                           QueryVariables variables,
                                            Progress progress) {
         String sql = selectFor(qualified, where, orderBy);
         File out = new File(dir, fileNameFor(token));
         return runSelect(connection, sql, maxRows, rowsPerFile, out,
                 qualified, index, total, skipExisting, resume,
-                estimatedRows, progress);
+                estimatedRows, variables, progress);
     }
 
     /**
@@ -510,6 +554,10 @@ public final class CsvExporter {
      * Si se cancela o falla a mitad se borra solo la parte en curso y se
      * conservan las partes ya completas (quedan en
      * {@link TableResult#getFileNames()} con un aviso).
+     *
+     * Con {@code variables} y {@code :NOMBRE} en el SQL se ejecuta como
+     * PreparedStatement con los valores enlazados; sin variables en el SQL
+     * se usa un Statement normal como siempre.
      */
     private static TableResult runSelect(Connection connection, String sql,
                                          int maxRows, int rowsPerFile,
@@ -517,6 +565,7 @@ public final class CsvExporter {
                                          int index, int total,
                                          boolean skipExisting, boolean resume,
                                          long estimatedRows,
+                                         QueryVariables variables,
                                          Progress progress) {
         File firstPart = rowsPerFile > 0 ? partFile(out, 1) : out;
         if (skipExisting && (out.isFile() || firstPart.isFile())) {
@@ -566,7 +615,16 @@ public final class CsvExporter {
         boolean cancelled = false;
         String error = null;
         try {
-            st = connection.createStatement();
+            QueryVariables.Bound bound = variables == null ? null
+                    : variables.bind(sql);
+            PreparedStatement prepared = null;
+            if (bound != null && bound.hasParameters()) {
+                prepared = connection.prepareStatement(bound.getSql());
+                st = prepared;
+                bound.apply(prepared);
+            } else {
+                st = connection.createStatement();
+            }
             if (progress != null) {
                 progress.onStatement(st);
             }
@@ -584,7 +642,8 @@ public final class CsvExporter {
                 if (progress != null) {
                     progress.onTotalRows(label, estimatedRows);
                 }
-                rs = st.executeQuery(sql);
+                rs = prepared != null ? prepared.executeQuery()
+                        : st.executeQuery(sql);
                 ResultSetMetaData md = rs.getMetaData();
                 int columns = md.getColumnCount();
 

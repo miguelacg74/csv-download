@@ -17,6 +17,12 @@ Codigo y documentacion en espanol, sin tildes en fuentes/comentarios (ASCII).
   una tabla con filas: ejercita `CsvExporter.export` SIN base de datos. Al cambiar
   la extraccion/escritura, actualizar esa simulacion y mantener verdes los chequeos
   de contenido del CSV, WHERE/limite, error por tabla y cancelacion.
+  `prepareStatement` de la conexion falsa devuelve el estimador si el SQL
+  contiene `NUM_ROWS` y, si no, un PreparedStatement de datos que guarda
+  los valores enlazados en `SelfTest.BOUND` (pruebas de variables).
+- Con Git Bash, invocar el JDK como
+  `"/c/app/sqldeveloper/jdk/jre/bin/javac.exe" ... test/SelfTest.java`
+  (con `C:\...` y `test\...` bash se come las barras invertidas).
 - `build/`, `dist/` y `out/` NO se versionan (estan en `.gitignore`); los dos
   primeros se regeneran con cada `build.bat` y `out/` con cada corrida de
   `SelfTest`. No re-añadirlos con `git add -f` ni committeandolos a mano.
@@ -73,13 +79,34 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 - Consulta personalizada (`exportQuery`): SELECT/WITH validado por
   `checkedQuery` (sin ';' final, comentarios iniciales OK), vuelca a UN CSV;
   reusa el mismo nucleo `runSelect` que las tablas.
+- Variables de consulta: `QueryVariables` (Java puro, inmutable) con tipos
+  TEXT/NUMBER/DATE/DATETIME. `bind(sql)` cambia cada `:NOMBRE` (fuera de
+  '...', q'[...]', "..." y comentarios) por `?` (DATE/DATETIME ->
+  `TO_DATE(?, 'YYYY-MM-DD[ HH24:MI:SS]')`, para no perder indices) y
+  `runSelect` usa `PreparedStatement` SOLO si hay variables en el SQL
+  (si no, `createStatement` como siempre). Variable no definida o valor
+  invalido -> SQLException -> error de esa tabla (el lote sigue). Vacio =
+  NULL. Valores relativos (`HOY`, `INICIO_MES-1M`...): meses/anios se
+  aplican antes del ancla, dias/semanas despues; `FIN_*` en DATETIME =
+  23:59:59. `export`/`exportQuery` fijan el momento con `at(now)` una vez
+  por llamada (todas las tablas usan las mismas fechas); las sobrecargas
+  sin `QueryVariables` siguen existiendo. `inline(sql)` sustituye por
+  literales para "Abrir en hoja SQL". Ambitos: globales en
+  `PresetHistory` (una clave `var.N` por variable + `var.count`, por el
+  limite de 8 KB de `Preferences`) y del preset (`ExportPreset.variables`,
+  array JSON anidado; version 3); `overriddenBy` combina (gana el preset).
+  `PresetBatch.run(..., globals, ...)` combina por preset. El dialogo
+  valida las variables usadas antes de aceptar; editor en
+  `VariablesDialog` (Swing puro, dos pestanas).
 - Presets: `ExportPreset` guarda TODO el estado del dialogo (tablas, carpeta,
   WHERE, ORDER BY, limite, "filas por archivo", "no reemplazar CSV
-  existentes", "reanudar partes", modo consulta, consulta y nombre de
-  archivo) en JSON via
+  existentes", "reanudar partes", modo consulta, consulta, nombre de
+  archivo y variables propias) en JSON via
   `JsonUtil` (serializador/parser propio: NO hay libreria JSON). Campo
   `version`; parser tolerante a claves desconocidas (las salta, incluidos
-  arrays/objetos anidados).
+  arrays/objetos anidados). `parseObjectRaw` devuelve los compuestos como
+  texto JSON, `parseArray` lee arrays de objetos planos y `JsonUtil.Raw`
+  escribe un fragmento ya serializado.
 - Historial de presets: `PresetHistory` (Java puro) guarda en
   `java.util.prefs` el MRU de presets cargados/guardados (maximo 10, el
   ultimo primero) y las ultimas carpetas usadas (salida de CSV y carpeta
@@ -138,11 +165,11 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 
 ## Sin dependencias externas
 
-`CsvExporter`, `ExportPreset`, `JsonUtil`, `PresetBatch` y
-`PresetHistory` son Java puro (JDBC + colecciones + io + prefs): deben
-seguir compilando y ejecutandose SIN los jars de SQL Developer.
-`CsvExportDialog` y `EditPopup` son Swing puro (el dialogo recibe el
-padre por parametro). Solo
+`CsvExporter`, `ExportPreset`, `JsonUtil`, `PresetBatch`,
+`PresetHistory` y `QueryVariables` son Java puro (JDBC + colecciones +
+io + prefs): deben seguir compilando y ejecutandose SIN los jars de SQL
+Developer. `CsvExportDialog`, `VariablesDialog` y `EditPopup` son Swing
+puro (el dialogo recibe el padre por parametro). Solo
 `CsvDownloadController` usa APIs del IDE.
 Mantener esa frontera es lo que permite probar la logica fuera del IDE.
 

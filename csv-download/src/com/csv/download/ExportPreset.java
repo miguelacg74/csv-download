@@ -9,8 +9,9 @@ import java.util.Map;
 
 /**
  * Preset de la descarga: el estado del dialogo (listado de tablas, carpeta,
- * WHERE, ORDER BY, limite de filas, filas por archivo, reanudar y consulta
- * personalizada) guardado como JSON en un archivo
+ * WHERE, ORDER BY, limite de filas, filas por archivo, reanudar, consulta
+ * personalizada y variables propias del preset) guardado como JSON en un
+ * archivo
  * {@code *.json} para recargarlo despues.
  *
  * El JSON se escribe y se lee con {@link JsonUtil} (no hay libreria JSON en
@@ -19,7 +20,7 @@ import java.util.Map;
  */
 public final class ExportPreset {
 
-    private static final int VERSION = 2;
+    private static final int VERSION = 3;
     private static final Charset UTF8 = Charset.forName("UTF-8");
 
     private String tables = "";
@@ -33,8 +34,21 @@ public final class ExportPreset {
     private boolean useCustomQuery;
     private String customQuery = "";
     private String customFileName = "";
+    private QueryVariables variables = QueryVariables.EMPTY;
 
     public ExportPreset() {
+    }
+
+    /**
+     * Variables propias del preset: al ejecutarlo sobrescriben a las
+     * globales del mismo nombre ({@link QueryVariables#overriddenBy}).
+     */
+    public QueryVariables getVariables() {
+        return variables;
+    }
+
+    public void setVariables(QueryVariables variables) {
+        this.variables = variables == null ? QueryVariables.EMPTY : variables;
     }
 
     public String getTables() {
@@ -140,6 +154,7 @@ public final class ExportPreset {
         values.put("useCustomQuery", useCustomQuery);
         values.put("customQuery", customQuery);
         values.put("customFileName", customFileName);
+        values.put("variables", new JsonUtil.Raw(variables.toJson()));
         return JsonUtil.objectToJson(values);
     }
 
@@ -161,6 +176,8 @@ public final class ExportPreset {
         preset.useCustomQuery = "true".equals(values.get("useCustomQuery"));
         preset.customQuery = value(values, "customQuery", "");
         preset.customFileName = value(values, "customFileName", "");
+        preset.variables = QueryVariables.fromJson(
+                JsonUtil.parseObjectRaw(json).get("variables"));
         return preset;
     }
 

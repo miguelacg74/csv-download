@@ -158,7 +158,8 @@ public class CsvDownloadController implements Controller {
                     };
                     presetResults = PresetBatch.run(connection,
                             request.getPresetFiles(),
-                            request.isSkipExisting(), batchProgress);
+                            request.isSkipExisting(), request.getVariables(),
+                            batchProgress);
                     return presetResults;
                 }
                 CsvExporter.Progress progress = new CsvExporter.Progress() {
@@ -194,13 +195,13 @@ public class CsvDownloadController implements Controller {
                                 request.getDirectory(),
                                 request.getCustomFileName(),
                                 request.isSkipExisting(), request.isResume(),
-                                progress)
+                                request.getVariables(), progress)
                         : CsvExporter.export(connection, request.getTables(),
                                 request.getWhere(), request.getOrderBy(),
                                 request.getMaxRows(), request.getRowsPerFile(),
                                 request.getDirectory(),
                                 request.isSkipExisting(), request.isResume(),
-                                progress);
+                                request.getVariables(), progress);
                 return results;
             }
 
