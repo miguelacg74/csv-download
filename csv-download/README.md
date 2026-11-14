@@ -5,6 +5,8 @@ listado de tablas a archivos CSV individuales (un archivo por tabla).
 
 Probado en Oracle SQL Developer 24.3.1.347.1826.
 
+Version actual: **1.1.0**
+
 ## Que hace
 
 - Pegas o escribes un **listado de tablas separadas por comas** (tambien
@@ -50,6 +52,14 @@ Probado en Oracle SQL Developer 24.3.1.347.1826.
   `A` (anios). Ej.: `INICIO_MES-1M` y `FIN_MES-1M` = mes anterior
   completo. Valor vacio = NULL. *Abrir en hoja SQL* sustituye las
   variables por literales.
+- **Version y actualizaciones**: en la esquina superior derecha del
+  dialogo se ve la version instalada (`v1.1.0 (al dia)` o
+  `v1.1.0 - disponible vX.Y.Z`), un icono de descarga y el logo de
+  GitHub. Al abrir el dialogo se consulta en segundo plano la ultima
+  release publicada en GitHub (sin bloquear nada; el resultado se
+  reutiliza 30 minutos). El icono de descarga vuelve a comprobar o, si
+  hay version nueva, explica como actualizar y descarga el JAR; el logo
+  abre el repositorio; el texto de la version abre "Acerca de".
 - La exportacion corre en segundo plano con progreso y boton de cancelar;
   una tabla que falla no detiene el lote (queda en el resumen con su error).
   Cancelar tambien interrumpe la consulta en curso (no hay que esperar a que
@@ -93,6 +103,19 @@ El JAR es un bundle OSGi y **debe ir en `dropins\`**, no en
 
 En Linux/macOS/Git Bash: `SQLDEV_HOME=/ruta/sqldeveloper ./build.sh`.
 
+## Publicar una version
+
+```bat
+cd <carpeta del repo>\csv-download
+release.bat 1.2.0 "notas de la version"
+```
+
+Requiere `git`, GitHub CLI (`gh auth login`) y `SQLDEV_HOME`. Pone el
+numero en `MANIFEST.MF`, `UpdateChecker.java` y este README, compila,
+crea el tag `v1.2.0`, hace push y publica la Release con
+`com.csv.download.jar` adjunto (siempre con ese nombre, para que funcione
+el enlace fijo `releases/latest/download/com.csv.download.jar`).
+
 ## Prueba sin SQL Developer
 
 ```bash
@@ -117,6 +140,23 @@ como separador del classpath.
   una variable es un unico valor: no sirve para listas `IN (:LISTA)`.
   Los valores relativos usan la fecha/hora del equipo, no `SYSDATE`.
 
+- El aviso de version nueva usa la API anonima de GitHub: mientras el
+  repositorio sea **privado** (o no tenga releases) la consulta no ve
+  nada y el dialogo solo muestra `v1.1.0` (sin "al dia"); el logo de
+  GitHub abre el repositorio solo si tu navegador tiene sesion con
+  acceso. Sin internet o con proxy que bloquee GitHub se muestra la
+  version sin aviso (el tooltip del icono indica el error).
+
+## Historial de versiones
+
+- **1.1.0**: version instalada, aviso de version nueva, descarga del JAR
+  y enlace al repositorio de GitHub en la esquina superior derecha del
+  dialogo (con "Acerca de"); script `release.bat` para publicar
+  versiones en GitHub Releases.
+- **1.0.0**: version inicial (exportacion por listado y consulta
+  personalizada, presets, lote de presets, variables, reanudacion y
+  salida partida).
+
 ## Estructura
 
 ```
@@ -133,7 +173,12 @@ src/com/csv/download/
   QueryVariables.java         variables :NOMBRE: valores (relativos),
                               parser SQL, enlace JDBC (Java puro)
   VariablesDialog.java        editor Swing de variables (globales/preset)
+  UpdateChecker.java          ultima release de GitHub y comparacion de
+                              versiones (Java puro)
+  UpdateBar.java              version, aviso de actualizacion y enlace a
+                              GitHub (esquina superior derecha, Swing)
 META-INF/MANIFEST.MF       bundle OSGi
 META-INF/extension.xml     descriptor de la extension (accion + menus)
 test/SelfTest.java         prueba manual del exportador y los presets
+release.bat / release.ps1  publica una version en GitHub Releases
 ```
