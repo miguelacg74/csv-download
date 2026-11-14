@@ -3,6 +3,7 @@ import com.csv.download.ExportPreset;
 import com.csv.download.PresetBatch;
 import com.csv.download.PresetHistory;
 import com.csv.download.QueryVariables;
+import com.csv.download.UpdateChecker;
 
 import java.io.File;
 import java.lang.reflect.InvocationHandler;
@@ -711,10 +712,39 @@ public final class SelfTest {
                 "al cancelar al inicio no deberia ejecutarse ningun preset");
 
         variablesTests(fake, executedSql, dir, batchDir);
+        updateCheckerTests();
 
         System.out.println("OK: todas las comprobaciones pasaron");
         deleteTree(dir);
         deleteTree(batchDir);
+    }
+
+    /** Comparacion de versiones y lectura de la respuesta de GitHub. */
+    private static void updateCheckerTests() {
+        check(UpdateChecker.compare("1.10.0", "1.9.9") > 0,
+                "1.10.0 deberia ser mayor que 1.9.9");
+        check(UpdateChecker.compare("v1.1", "1.1.0") == 0,
+                "v1.1 y 1.1.0 deberian ser iguales");
+        check(UpdateChecker.compare("1.0.9", "1.1.0") < 0,
+                "1.0.9 deberia ser menor que 1.1.0");
+        String json = "{\"url\":\"x\",\"html_url\":\"https://github.com/r/releases/tag/v1.2.3\","
+                + "\"tag_name\":\"v1.2.3\",\"author\":{\"login\":\"a\",\"id\":1},"
+                + "\"draft\":false,\"assets\":[{\"name\":\"notas.txt\","
+                + "\"browser_download_url\":\"https://x/notas.txt\"},"
+                + "{\"name\":\"otro.jar\",\"uploader\":{\"id\":2},"
+                + "\"browser_download_url\":\"https://x/otro.jar\"},"
+                + "{\"name\":\"com.csv.download.jar\",\"size\":123,"
+                + "\"browser_download_url\":\"https://x/com.csv.download.jar\"}],"
+                + "\"body\":null}";
+        UpdateChecker.Release r = UpdateChecker.parseRelease(json);
+        check("1.2.3".equals(r.version), "version de la release mal leida: " + r.version);
+        check("https://github.com/r/releases/tag/v1.2.3".equals(r.pageUrl),
+                "pagina de la release mal leida");
+        check("https://x/com.csv.download.jar".equals(r.jarUrl),
+                "deberia preferirse el JAR com.csv.download.jar: " + r.jarUrl);
+        r = UpdateChecker.parseRelease("{\"tag_name\":\"2.0.0\",\"assets\":[]}");
+        check(r.jarUrl == null && UpdateChecker.RELEASES_URL.equals(r.pageUrl),
+                "sin assets el JAR deberia ser null y la pagina la de releases");
     }
 
     /** Variables de consulta: valores, parser, enlace, export y lote. */

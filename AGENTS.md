@@ -23,6 +23,13 @@ Codigo y documentacion en espanol, sin tildes en fuentes/comentarios (ASCII).
 - Con Git Bash, invocar el JDK como
   `"/c/app/sqldeveloper/jdk/jre/bin/javac.exe" ... test/SelfTest.java`
   (con `C:\...` y `test\...` bash se come las barras invertidas).
+- Publicar version: `csv-download\release.bat X.Y.Z ["notas"]` (requiere
+  `gh auth` + `SQLDEV_HOME`): sincroniza el numero en MANIFEST /
+  `UpdateChecker.CURRENT_VERSION` / "Version actual" del README, compila,
+  tag `vX.Y.Z`, push y Release en GitHub con el JAR. El asset se llama
+  siempre `com.csv.download.jar` (permalink
+  `releases/latest/download/...`). No editar esos 3 numeros a mano por
+  separado: deben coincidir.
 - `build/`, `dist/` y `out/` NO se versionan (estan en `.gitignore`); los dos
   primeros se regeneran con cada `build.bat` y `out/` con cada corrida de
   `SelfTest`. No re-añadirlos con `git add -f` ni committeandolos a mano.
@@ -141,6 +148,15 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
   `{"format":"csv-download-variables","version":1,"variables":[...]}`).
   `fromFileJson` tolera BOM y acepta tambien un preset o un array suelto.
   Importar fusiona en la tabla (gana el archivo) y solo persiste al Aceptar.
+- Version y actualizaciones: `UpdateBar` (Swing puro, cabecera del
+  dialogo a la derecha) muestra la version, icono de descarga y logo de
+  GitHub (iconos pintados con Java2D, sin imagenes). Consulta
+  `UpdateChecker.fetchLatest` (Java puro, API anonima
+  `releases/latest`, 404 = sin releases o repo privado -> null) en un
+  hilo daemon, nunca en el EDT, con cache estatica de 30 min (el
+  dialogo es modal y se recrea en cada apertura); el clic en descarga
+  fuerza la consulta. `parseRelease` usa `JsonUtil.parseObjectRaw` +
+  `parseArray` para `assets`.
 - Tooltips: todo campo, checkbox y boton lleva `setToolTipText` (los campos
   en `CsvExportDialog.installFieldTips`); mantenerlo al anadir controles.
 - Lote de presets: `PresetBatch` (Java puro) ejecuta los `*.json` de una
@@ -182,10 +198,10 @@ del contexto y orquesta; toda la logica de datos vive en `CsvExporter`.
 ## Sin dependencias externas
 
 `CsvExporter`, `ExportPreset`, `JsonUtil`, `PresetBatch`,
-`PresetHistory` y `QueryVariables` son Java puro (JDBC + colecciones +
-io + prefs): deben seguir compilando y ejecutandose SIN los jars de SQL
-Developer. `CsvExportDialog`, `VariablesDialog` y `EditPopup` son Swing
-puro (el dialogo recibe el padre por parametro). Solo
+`PresetHistory`, `QueryVariables` y `UpdateChecker` son Java puro (JDBC + colecciones +
+io + prefs + net): deben seguir compilando y ejecutandose SIN los jars de SQL
+Developer. `CsvExportDialog`, `VariablesDialog`, `EditPopup` y `UpdateBar` son
+Swing puro (el dialogo recibe el padre por parametro). Solo
 `CsvDownloadController` usa APIs del IDE.
 Mantener esa frontera es lo que permite probar la logica fuera del IDE.
 

@@ -321,7 +321,10 @@ public class CsvExportDialog extends JDialog {
         if (connectionName != null && !connectionName.trim().isEmpty()) {
             title = "Tablas de '" + connectionName + "' (separadas por comas):";
         }
-        addRow(form, g, row++, new JLabel(title));
+        JPanel header = new JPanel(new BorderLayout(8, 0));
+        header.add(new JLabel(title), BorderLayout.WEST);
+        header.add(new UpdateBar(), BorderLayout.EAST);
+        addRow(form, g, row++, header);
         tablesArea.setLineWrap(true);
         tablesArea.setWrapStyleWord(true);
         addRow(form, g, row++, new JScrollPane(tablesArea));
