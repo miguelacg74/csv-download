@@ -19,7 +19,7 @@ import java.util.regex.Pattern;
 public final class UpdateChecker {
 
     /** Mantener igual a Bundle-Version de META-INF/MANIFEST.MF. */
-    public static final String CURRENT_VERSION = "1.1.0";
+    public static final String CURRENT_VERSION = "1.1.1";
     public static final String REPO = "miguelacg74/csv-download";
     public static final String REPO_URL = "https://github.com/" + REPO;
     public static final String RELEASES_URL = REPO_URL + "/releases";

@@ -5,7 +5,7 @@ listado de tablas a archivos CSV individuales (un archivo por tabla).
 
 Probado en Oracle SQL Developer 24.3.1.347.1826.
 
-Version actual: **1.1.0**
+Version actual: **1.1.1**
 
 ## Que hace
 
@@ -88,9 +88,9 @@ Version actual: **1.1.0**
 ## Compilar e instalar (Windows)
 
 ```bat
-cd C:\Users\compr\Documents\proyectos\plugin\csv-download\csv-download
+cd <carpeta del repo>\csv-download
 build.bat
-copy /y dist\com.csv.download.jar C:\app\sqldeveloper\dropins\
+copy /y dist\com.csv.download.jar "<carpeta de SQL Developer>\dropins\"
 ```
 
 Reinicia SQL Developer. `build.bat` asume `SQLDEV_HOME=C:\app\sqldeveloper` y
@@ -140,15 +140,16 @@ como separador del classpath.
   una variable es un unico valor: no sirve para listas `IN (:LISTA)`.
   Los valores relativos usan la fecha/hora del equipo, no `SYSDATE`.
 
-- El aviso de version nueva usa la API anonima de GitHub: mientras el
-  repositorio sea **privado** (o no tenga releases) la consulta no ve
-  nada y el dialogo solo muestra `v1.1.0` (sin "al dia"); el logo de
-  GitHub abre el repositorio solo si tu navegador tiene sesion con
-  acceso. Sin internet o con proxy que bloquee GitHub se muestra la
-  version sin aviso (el tooltip del icono indica el error).
+- El aviso de version nueva usa la API anonima de GitHub (60 consultas
+  por hora por IP; el resultado se reutiliza 30 minutos). Sin internet
+  o con proxy que bloquee GitHub se muestra la version sin aviso (el
+  tooltip del icono indica el error).
 
 ## Historial de versiones
 
+- **1.1.1**: el icono de descarga vuelve a consultar GitHub (sin
+  esperar la cache) cuando no hay version nueva; `release.bat` funciona
+  desde la raiz del repo y se detiene si falla el commit o el tag.
 - **1.1.0**: version instalada, aviso de version nueva, descarga del JAR
   y enlace al repositorio de GitHub en la esquina superior derecha del
   dialogo (con "Acerca de"); script `release.bat` para publicar
