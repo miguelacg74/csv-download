@@ -34,6 +34,7 @@ if ($visibility -ne 'PUBLIC') {
 
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 function Set-Version($path, $pattern, $replacement) {
+    $path = Join-Path $PSScriptRoot $path
     $text = [IO.File]::ReadAllText($path)
     if ($text -notmatch $pattern) {
         throw "No se encontro el numero de version en $path"
@@ -51,8 +52,12 @@ if ($LASTEXITCODE -ne 0) { throw "Fallo la compilacion" }
 
 git add META-INF/MANIFEST.MF src/com/csv/download/UpdateChecker.java README.md
 git diff --cached --quiet
-if ($LASTEXITCODE -ne 0) { git commit -m "v$Version" }
+if ($LASTEXITCODE -ne 0) {
+    git commit -m "v$Version"
+    if ($LASTEXITCODE -ne 0) { throw "Fallo el commit de la version" }
+}
 git tag -a "v$Version" -m "v$Version"
+if ($LASTEXITCODE -ne 0) { throw "Fallo la creacion del tag v$Version" }
 git push origin HEAD --follow-tags
 if ($LASTEXITCODE -ne 0) { throw "Fallo el push" }
 

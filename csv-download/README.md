@@ -88,9 +88,9 @@ Version actual: **1.1.0**
 ## Compilar e instalar (Windows)
 
 ```bat
-cd C:\Users\compr\Documents\proyectos\plugin\csv-download\csv-download
+cd <carpeta del repo>\csv-download
 build.bat
-copy /y dist\com.csv.download.jar C:\app\sqldeveloper\dropins\
+copy /y dist\com.csv.download.jar "<carpeta de SQL Developer>\dropins\"
 ```
 
 Reinicia SQL Developer. `build.bat` asume `SQLDEV_HOME=C:\app\sqldeveloper` y
