@@ -74,10 +74,10 @@ public final class UpdateBar extends JPanel {
 
     private void onDownload() {
         UpdateChecker.Release r = latest;
-        if (r == null) {
+        if (r == null || UpdateChecker.compare(r.version,
+                UpdateChecker.CURRENT_VERSION) <= 0) {
             check(true);
-        } else if (UpdateChecker.compare(r.version,
-                UpdateChecker.CURRENT_VERSION) > 0) {
+        } else {
             String url = r.jarUrl != null ? r.jarUrl : r.pageUrl;
             String msg = "Hay una version nueva: v" + r.version
                     + " (instalada: v" + UpdateChecker.CURRENT_VERSION + ")\n\n"
@@ -97,8 +97,6 @@ public final class UpdateBar extends JPanel {
             } else if (c == 1) {
                 open(r.pageUrl);
             }
-        } else {
-            open(r.pageUrl);
         }
     }
 
